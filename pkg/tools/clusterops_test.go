@@ -1,0 +1,203 @@
+package tools
+
+import (
+	"context"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+
+	"github.com/randybias/tentacular-mcp/pkg/k8s"
+)
+
+func newClusterOpsTestClient() *k8s.Client {
+	return &k8s.Client{
+		Clientset: fake.NewSimpleClientset(),
+		Config:    &rest.Config{Host: "https://test-cluster:6443"},
+	}
+}
+
+// TestClusterPreflightReturnsChecks verifies preflight returns results.
+func TestClusterPreflightReturnsChecks(t *testing.T) {
+	client := newClusterOpsTestClient()
+	ctx := context.Background()
+
+	result, err := handleClusterPreflight(ctx, client, ClusterPreflightParams{Namespace: "my-ns"})
+	if err != nil {
+		t.Fatalf("handleClusterPreflight: %v", err)
+	}
+
+	if len(result.Checks) == 0 {
+		t.Error("expected at least one check result")
+	}
+}
+
+// TestClusterPreflightAPIReachabilityCheck verifies api-reachability check is present.
+func TestClusterPreflightAPIReachabilityCheck(t *testing.T) {
+	client := newClusterOpsTestClient()
+	ctx := context.Background()
+
+	result, err := handleClusterPreflight(ctx, client, ClusterPreflightParams{Namespace: "test-ns"})
+	if err != nil {
+		t.Fatalf("handleClusterPreflight: %v", err)
+	}
+
+	foundAPI := false
+	for _, c := range result.Checks {
+		if c.Name == "api-reachability" {
+			foundAPI = true
+			if !c.Passed {
+				t.Error("expected api-reachability to pass with fake client")
+			}
+		}
+	}
+	if !foundAPI {
+		t.Error("expected api-reachability check in results")
+	}
+}
+
+// TestClusterPreflightNamespaceMissingFails verifies namespace-exists fails for non-existent ns.
+func TestClusterPreflightNamespaceMissingFails(t *testing.T) {
+	client := newClusterOpsTestClient()
+	ctx := context.Background()
+
+	result, err := handleClusterPreflight(ctx, client, ClusterPreflightParams{Namespace: "ghost-ns"})
+	if err != nil {
+		t.Fatalf("handleClusterPreflight: %v", err)
+	}
+
+	foundNS := false
+	for _, c := range result.Checks {
+		if c.Name == "namespace-exists" {
+			foundNS = true
+			if c.Passed {
+				t.Error("expected namespace-exists to fail for non-existent namespace")
+			}
+			if c.Remediation == "" {
+				t.Error("expected Remediation to be set for failed namespace check")
+			}
+		}
+	}
+	if !foundNS {
+		t.Error("expected namespace-exists check in results")
+	}
+}
+
+// TestClusterPreflightNamespaceExists verifies namespace-exists passes when ns exists.
+func TestClusterPreflightNamespaceExists(t *testing.T) {
+	client := newClusterOpsTestClient()
+	ctx := context.Background()
+
+	client.Clientset.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "existing-ns"},
+	}, metav1.CreateOptions{})
+
+	result, err := handleClusterPreflight(ctx, client, ClusterPreflightParams{Namespace: "existing-ns"})
+	if err != nil {
+		t.Fatalf("handleClusterPreflight: %v", err)
+	}
+
+	for _, c := range result.Checks {
+		if c.Name == "namespace-exists" && !c.Passed {
+			t.Error("expected namespace-exists to pass for existing namespace")
+		}
+	}
+}
+
+// TestClusterPreflightGVisorCheckPresent verifies gvisor check is in results.
+func TestClusterPreflightGVisorCheckPresent(t *testing.T) {
+	client := newClusterOpsTestClient()
+	ctx := context.Background()
+
+	result, err := handleClusterPreflight(ctx, client, ClusterPreflightParams{Namespace: "test-ns"})
+	if err != nil {
+		t.Fatalf("handleClusterPreflight: %v", err)
+	}
+
+	found := false
+	for _, c := range result.Checks {
+		if c.Name == "gvisor-runtime" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected gvisor-runtime check in preflight results")
+	}
+}
+
+// TestClusterProfileReturnsProfile verifies cluster_profile returns a profile.
+func TestClusterProfileReturnsProfile(t *testing.T) {
+	client := newClusterOpsTestClient()
+	ctx := context.Background()
+
+	result, err := handleClusterProfile(ctx, client, ClusterProfileParams{})
+	if err != nil {
+		t.Fatalf("handleClusterProfile: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil profile")
+	}
+}
+
+// TestClusterProfileExtensionsMap verifies the Extensions map is initialized.
+func TestClusterProfileExtensionsMap(t *testing.T) {
+	client := newClusterOpsTestClient()
+	ctx := context.Background()
+
+	result, err := handleClusterProfile(ctx, client, ClusterProfileParams{})
+	if err != nil {
+		t.Fatalf("handleClusterProfile: %v", err)
+	}
+	if result.Extensions == nil {
+		t.Error("expected Extensions map to be initialized")
+	}
+}
+
+// TestClusterProfileWithNamespace verifies profile includes namespace details when specified.
+func TestClusterProfileWithNamespace(t *testing.T) {
+	client := newClusterOpsTestClient()
+	ctx := context.Background()
+
+	client.Clientset.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "profiled-ns",
+			Labels: map[string]string{
+				"pod-security.kubernetes.io/enforce": "restricted",
+			},
+		},
+	}, metav1.CreateOptions{})
+
+	result, err := handleClusterProfile(ctx, client, ClusterProfileParams{Namespace: "profiled-ns"})
+	if err != nil {
+		t.Fatalf("handleClusterProfile: %v", err)
+	}
+	if result.Namespace != "profiled-ns" {
+		t.Errorf("expected Namespace=profiled-ns, got %q", result.Namespace)
+	}
+	if result.PodSecurity != "restricted" {
+		t.Errorf("expected PodSecurity=restricted, got %q", result.PodSecurity)
+	}
+}
+
+// TestClusterProfileGVisorDetected verifies gVisor flag is set when RuntimeClass present.
+func TestClusterProfileGVisorDetected(t *testing.T) {
+	client := newClusterOpsTestClient()
+	ctx := context.Background()
+
+	rc := &nodev1.RuntimeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "gvisor"},
+		Handler:    "runsc",
+	}
+	client.Clientset.NodeV1().RuntimeClasses().Create(ctx, rc, metav1.CreateOptions{})
+
+	result, err := handleClusterProfile(ctx, client, ClusterProfileParams{})
+	if err != nil {
+		t.Fatalf("handleClusterProfile: %v", err)
+	}
+	if !result.GVisor {
+		t.Error("expected GVisor=true when RuntimeClass with runsc handler exists")
+	}
+}

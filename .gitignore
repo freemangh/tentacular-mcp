@@ -1,0 +1,7 @@
+bin/
+scratch/
+*.exe
+*.test
+*.out
+.env
+.mcp.json

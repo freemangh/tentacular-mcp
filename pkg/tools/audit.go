@@ -1,0 +1,342 @@
+package tools
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/randybias/tentacular-mcp/pkg/guard"
+	"github.com/randybias/tentacular-mcp/pkg/k8s"
+)
+
+// AuditRbacParams are the parameters for audit_rbac.
+type AuditRbacParams struct {
+	Namespace string `json:"namespace" jsonschema:"Namespace to audit RBAC in"`
+}
+
+// AuditFinding is a single RBAC audit finding.
+type AuditFinding struct {
+	Role     string `json:"role"`
+	Rule     string `json:"rule"`
+	Severity string `json:"severity"`
+	Reason   string `json:"reason"`
+}
+
+// AuditRbacResult is the result of audit_rbac.
+type AuditRbacResult struct {
+	Findings []AuditFinding `json:"findings"`
+}
+
+// AuditNetpolParams are the parameters for audit_netpol.
+type AuditNetpolParams struct {
+	Namespace string `json:"namespace" jsonschema:"Namespace to audit network policies in"`
+}
+
+// NetpolInfo is a single network policy in the audit result.
+type NetpolInfo struct {
+	Name        string   `json:"name"`
+	Types       []string `json:"types"`
+	PodSelector string   `json:"pod_selector"`
+}
+
+// AuditNetpolFinding is a single netpol audit finding.
+type AuditNetpolFinding struct {
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+}
+
+// AuditNetpolResult is the result of audit_netpol.
+type AuditNetpolResult struct {
+	DefaultDeny bool                 `json:"default_deny"`
+	Policies    []NetpolInfo         `json:"policies"`
+	Findings    []AuditNetpolFinding `json:"findings"`
+}
+
+// AuditPsaParams are the parameters for audit_psa.
+type AuditPsaParams struct {
+	Namespace string `json:"namespace" jsonschema:"Namespace to audit Pod Security Admission configuration in"`
+}
+
+// AuditPsaFinding is a single PSA audit finding.
+type AuditPsaFinding struct {
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+}
+
+// AuditPsaResult is the result of audit_psa.
+type AuditPsaResult struct {
+	Compliant bool              `json:"compliant"`
+	Enforce   string            `json:"enforce"`
+	Audit     string            `json:"audit"`
+	Warn      string            `json:"warn"`
+	Findings  []AuditPsaFinding `json:"findings"`
+}
+
+func registerAuditTools(srv *mcp.Server, client *k8s.Client) {
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "audit_rbac",
+		Description: "Audit RBAC in a namespace: scan for wildcard verbs/resources, sensitive access, and ClusterRoleBindings targeting namespace service accounts.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params AuditRbacParams) (*mcp.CallToolResult, AuditRbacResult, error) {
+		if err := guard.CheckNamespace(params.Namespace); err != nil {
+			return nil, AuditRbacResult{}, err
+		}
+		result, err := handleAuditRbac(ctx, client, params)
+		return nil, result, err
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "audit_netpol",
+		Description: "Audit network policies in a namespace: check for default-deny policy, missing egress restrictions, and list all policies.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params AuditNetpolParams) (*mcp.CallToolResult, AuditNetpolResult, error) {
+		if err := guard.CheckNamespace(params.Namespace); err != nil {
+			return nil, AuditNetpolResult{}, err
+		}
+		result, err := handleAuditNetpol(ctx, client, params)
+		return nil, result, err
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "audit_psa",
+		Description: "Audit Pod Security Admission labels on a namespace: check enforce/audit/warn levels and flag non-restricted or missing configuration.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params AuditPsaParams) (*mcp.CallToolResult, AuditPsaResult, error) {
+		if err := guard.CheckNamespace(params.Namespace); err != nil {
+			return nil, AuditPsaResult{}, err
+		}
+		result, err := handleAuditPsa(ctx, client, params)
+		return nil, result, err
+	})
+}
+
+var sensitiveResources = map[string]bool{
+	"secrets":               true,
+	"serviceaccounts/token": true,
+	"pods/exec":             true,
+	"pods/attach":           true,
+}
+
+func handleAuditRbac(ctx context.Context, client *k8s.Client, params AuditRbacParams) (AuditRbacResult, error) {
+	findings := []AuditFinding{}
+
+	// Scan Roles
+	roles, err := client.Clientset.RbacV1().Roles(params.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return AuditRbacResult{}, fmt.Errorf("list roles in namespace %q: %w", params.Namespace, err)
+	}
+
+	for _, role := range roles.Items {
+		for _, rule := range role.Rules {
+			ruleDesc := ruleDescription(rule)
+			// Check wildcard verbs
+			for _, verb := range rule.Verbs {
+				if verb == "*" {
+					findings = append(findings, AuditFinding{
+						Role:     fmt.Sprintf("Role/%s", role.Name),
+						Rule:     ruleDesc,
+						Severity: "high",
+						Reason:   "wildcard verb grants all permissions",
+					})
+				}
+			}
+			// Check wildcard resources
+			for _, res := range rule.Resources {
+				if res == "*" {
+					findings = append(findings, AuditFinding{
+						Role:     fmt.Sprintf("Role/%s", role.Name),
+						Rule:     ruleDesc,
+						Severity: "high",
+						Reason:   "wildcard resource grants access to all resource types",
+					})
+				}
+				// Check sensitive resources
+				if sensitiveResources[res] {
+					findings = append(findings, AuditFinding{
+						Role:     fmt.Sprintf("Role/%s", role.Name),
+						Rule:     ruleDesc,
+						Severity: "medium",
+						Reason:   fmt.Sprintf("access to sensitive resource %q", res),
+					})
+				}
+			}
+		}
+	}
+
+	// Scan RoleBindings for ClusterRole bindings (which may escalate privileges)
+	rbs, err := client.Clientset.RbacV1().RoleBindings(params.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return AuditRbacResult{}, fmt.Errorf("list rolebindings in namespace %q: %w", params.Namespace, err)
+	}
+	for _, rb := range rbs.Items {
+		if rb.RoleRef.Kind == "ClusterRole" {
+			findings = append(findings, AuditFinding{
+				Role:     fmt.Sprintf("RoleBinding/%s", rb.Name),
+				Rule:     fmt.Sprintf("binds ClusterRole/%s", rb.RoleRef.Name),
+				Severity: "low",
+				Reason:   "RoleBinding references a ClusterRole; review cluster-level permissions",
+			})
+		}
+	}
+
+	// Inspect ClusterRoleBindings targeting namespace ServiceAccounts
+	crbs, err := client.Clientset.RbacV1().ClusterRoleBindings().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return AuditRbacResult{}, fmt.Errorf("list cluster role bindings: %w", err)
+	}
+	for _, crb := range crbs.Items {
+		for _, subj := range crb.Subjects {
+			if subj.Kind == "ServiceAccount" && subj.Namespace == params.Namespace {
+				findings = append(findings, AuditFinding{
+					Role:     fmt.Sprintf("ClusterRoleBinding/%s", crb.Name),
+					Rule:     fmt.Sprintf("binds ClusterRole/%s to SA %s/%s", crb.RoleRef.Name, params.Namespace, subj.Name),
+					Severity: "medium",
+					Reason:   "service account in namespace has cluster-wide permissions",
+				})
+			}
+		}
+	}
+
+	return AuditRbacResult{Findings: findings}, nil
+}
+
+func ruleDescription(rule rbacv1.PolicyRule) string {
+	groups := strings.Join(rule.APIGroups, ",")
+	if groups == "" {
+		groups = "core"
+	}
+	resources := strings.Join(rule.Resources, ",")
+	verbs := strings.Join(rule.Verbs, ",")
+	return fmt.Sprintf("apiGroups=[%s] resources=[%s] verbs=[%s]", groups, resources, verbs)
+}
+
+func handleAuditNetpol(ctx context.Context, client *k8s.Client, params AuditNetpolParams) (AuditNetpolResult, error) {
+	policies, err := client.Clientset.NetworkingV1().NetworkPolicies(params.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return AuditNetpolResult{}, fmt.Errorf("list network policies in namespace %q: %w", params.Namespace, err)
+	}
+
+	findings := []AuditNetpolFinding{}
+	defaultDeny := false
+	hasEgressRestriction := false
+
+	policyInfos := make([]NetpolInfo, 0, len(policies.Items))
+	for _, p := range policies.Items {
+		types := make([]string, 0, len(p.Spec.PolicyTypes))
+		for _, t := range p.Spec.PolicyTypes {
+			types = append(types, string(t))
+		}
+
+		// Check if this is a default-deny policy (selects all pods, blocks ingress and egress)
+		if len(p.Spec.PodSelector.MatchLabels) == 0 && len(p.Spec.PodSelector.MatchExpressions) == 0 &&
+			len(p.Spec.Ingress) == 0 && len(p.Spec.Egress) == 0 {
+			hasIngress := false
+			hasEgress := false
+			for _, t := range p.Spec.PolicyTypes {
+				if t == "Ingress" {
+					hasIngress = true
+				}
+				if t == "Egress" {
+					hasEgress = true
+				}
+			}
+			if hasIngress && hasEgress {
+				defaultDeny = true
+			}
+		}
+
+		// Check for egress restrictions
+		for _, t := range p.Spec.PolicyTypes {
+			if t == "Egress" {
+				hasEgressRestriction = true
+			}
+		}
+
+		selectorStr := "all pods"
+		if len(p.Spec.PodSelector.MatchLabels) > 0 {
+			parts := []string{}
+			for k, v := range p.Spec.PodSelector.MatchLabels {
+				parts = append(parts, k+"="+v)
+			}
+			selectorStr = strings.Join(parts, ",")
+		}
+
+		policyInfos = append(policyInfos, NetpolInfo{
+			Name:        p.Name,
+			Types:       types,
+			PodSelector: selectorStr,
+		})
+	}
+
+	if !defaultDeny {
+		findings = append(findings, AuditNetpolFinding{
+			Severity: "high",
+			Message:  "no default-deny NetworkPolicy found; traffic is unrestricted by default",
+		})
+	}
+
+	if !hasEgressRestriction {
+		findings = append(findings, AuditNetpolFinding{
+			Severity: "medium",
+			Message:  "no egress NetworkPolicy found; pods may be able to reach external services",
+		})
+	}
+
+	return AuditNetpolResult{
+		DefaultDeny: defaultDeny,
+		Policies:    policyInfos,
+		Findings:    findings,
+	}, nil
+}
+
+func handleAuditPsa(ctx context.Context, client *k8s.Client, params AuditPsaParams) (AuditPsaResult, error) {
+	ns, err := k8s.GetNamespace(ctx, client, params.Namespace)
+	if err != nil {
+		return AuditPsaResult{}, err
+	}
+
+	labels := ns.Labels
+	enforce := labels["pod-security.kubernetes.io/enforce"]
+	audit := labels["pod-security.kubernetes.io/audit"]
+	warn := labels["pod-security.kubernetes.io/warn"]
+
+	findings := []AuditPsaFinding{}
+	compliant := true
+
+	if enforce == "" {
+		findings = append(findings, AuditPsaFinding{
+			Severity: "high",
+			Message:  "pod-security.kubernetes.io/enforce label is missing; no PSA enforcement active",
+		})
+		compliant = false
+	} else if enforce != "restricted" {
+		findings = append(findings, AuditPsaFinding{
+			Severity: "medium",
+			Message:  fmt.Sprintf("PSA enforce level is %q; recommended level is \"restricted\"", enforce),
+		})
+		compliant = false
+	}
+
+	if audit == "" {
+		findings = append(findings, AuditPsaFinding{
+			Severity: "low",
+			Message:  "pod-security.kubernetes.io/audit label is missing",
+		})
+	}
+
+	if warn == "" {
+		findings = append(findings, AuditPsaFinding{
+			Severity: "low",
+			Message:  "pod-security.kubernetes.io/warn label is missing",
+		})
+	}
+
+	return AuditPsaResult{
+		Compliant: compliant,
+		Enforce:   enforce,
+		Audit:     audit,
+		Warn:      warn,
+		Findings:  findings,
+	}, nil
+}
