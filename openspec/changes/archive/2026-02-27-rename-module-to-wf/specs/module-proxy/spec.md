@@ -1,8 +1,5 @@
-# module-proxy Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change in-cluster-mcp-server. Update Purpose after archive.
-## Requirements
 ### Requirement: Apply module release
 The system SHALL apply a set of Kubernetes manifests to a managed namespace using the dynamic client, tracking all created/updated resources with a release label (`tentacular.io/release: <name>`). The input SHALL include the deployment name, namespace, and a list of Kubernetes resource manifests as unstructured JSON/YAML. The ClusterRole SHALL grant `create,update,delete,patch,get,list,watch` verbs on all module resource types including deployments, services, configmaps, secrets, jobs, cronjobs, networkpolicies, and ingresses (networking.k8s.io). The `patch` verb is required for incremental updates (strategic merge patches). The `watch` verb supports status monitoring. The system SHALL validate that the namespace is managed by tentacular and reject the operation if the target namespace is `tentacular-system`.
 

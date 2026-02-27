@@ -17,7 +17,7 @@ func RegisterAll(srv *mcp.Server, client *k8s.Client, logger *slog.Logger) {
 	registerDiscoverTools(srv, client)
 	registerClusterOpsTools(srv, client)
 	registerGVisorTools(srv, client)
-	registerModuleTools(srv, client)
+	registerDeployTools(srv, client)
 	registerHealthTools(srv, client)
 	registerAuditTools(srv, client)
 }

@@ -17,101 +17,101 @@ import (
 
 const releaseLabelKey = "tentacular.io/release"
 
-// allowedKinds is the set of Kubernetes resource kinds module_apply will
+// allowedKinds is the set of Kubernetes resource kinds wf_apply will
 // accept. Cluster-scoped and sensitive kinds are not permitted.
 var allowedKinds = map[string]bool{
-	"Deployment":    true,
-	"Service":       true,
+	"Deployment":            true,
+	"Service":               true,
 	"PersistentVolumeClaim": true,
-	"NetworkPolicy": true,
-	"ConfigMap":     true,
-	"Secret":        true,
-	"Job":           true,
-	"CronJob":       true,
-	"Ingress":       true,
+	"NetworkPolicy":         true,
+	"ConfigMap":             true,
+	"Secret":                true,
+	"Job":                   true,
+	"CronJob":               true,
+	"Ingress":               true,
 }
 
-// ModuleApplyParams are the parameters for module_apply.
-type ModuleApplyParams struct {
-	Namespace string                   `json:"namespace" jsonschema:"Target namespace for the module"`
-	Release   string                   `json:"release" jsonschema:"Release name for tracking resources"`
+// WorkflowApplyParams are the parameters for wf_apply.
+type WorkflowApplyParams struct {
+	Namespace string                   `json:"namespace" jsonschema:"Target namespace for the workflow"`
+	Name      string                   `json:"name" jsonschema:"Deployment name for tracking resources"`
 	Manifests []map[string]interface{} `json:"manifests" jsonschema:"List of Kubernetes manifest objects to apply"`
 }
 
-// ModuleApplyResult is the result of module_apply.
-type ModuleApplyResult struct {
-	Release   string `json:"release"`
+// WorkflowApplyResult is the result of wf_apply.
+type WorkflowApplyResult struct {
+	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 	Created   int    `json:"created"`
 	Updated   int    `json:"updated"`
 	Deleted   int    `json:"deleted"`
 }
 
-// ModuleRemoveParams are the parameters for module_remove.
-type ModuleRemoveParams struct {
-	Namespace string `json:"namespace" jsonschema:"Namespace containing the module resources"`
-	Release   string `json:"release" jsonschema:"Release name to remove"`
+// WorkflowRemoveParams are the parameters for wf_remove.
+type WorkflowRemoveParams struct {
+	Namespace string `json:"namespace" jsonschema:"Namespace containing the workflow resources"`
+	Name      string `json:"name" jsonschema:"Deployment name to remove"`
 }
 
-// ModuleRemoveResult is the result of module_remove.
-type ModuleRemoveResult struct {
-	Release   string `json:"release"`
+// WorkflowRemoveResult is the result of wf_remove.
+type WorkflowRemoveResult struct {
+	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 	Deleted   int    `json:"deleted"`
 }
 
-// ModuleStatusParams are the parameters for module_status.
-type ModuleStatusParams struct {
-	Namespace string `json:"namespace" jsonschema:"Namespace containing the module resources"`
-	Release   string `json:"release" jsonschema:"Release name to check status for"`
+// WorkflowStatusParams are the parameters for wf_status.
+type WorkflowStatusParams struct {
+	Namespace string `json:"namespace" jsonschema:"Namespace containing the workflow resources"`
+	Name      string `json:"name" jsonschema:"Deployment name to check status for"`
 }
 
-// ModuleResourceStatus is the status of a single resource in a module.
-type ModuleResourceStatus struct {
+// WorkflowResourceStatus is the status of a single resource in a workflow deployment.
+type WorkflowResourceStatus struct {
 	Kind   string `json:"kind"`
 	Name   string `json:"name"`
 	Ready  bool   `json:"ready"`
 	Reason string `json:"reason,omitempty"`
 }
 
-// ModuleStatusResult is the result of module_status.
-type ModuleStatusResult struct {
-	Release   string                 `json:"release"`
-	Namespace string                 `json:"namespace"`
-	Resources []ModuleResourceStatus `json:"resources"`
+// WorkflowStatusResult is the result of wf_status.
+type WorkflowStatusResult struct {
+	Name      string                   `json:"name"`
+	Namespace string                   `json:"namespace"`
+	Resources []WorkflowResourceStatus `json:"resources"`
 }
 
-func registerModuleTools(srv *mcp.Server, client *k8s.Client) {
+func registerDeployTools(srv *mcp.Server, client *k8s.Client) {
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "module_apply",
-		Description: "Apply a set of Kubernetes manifests as a named release in a namespace. Uses release labels for tracking and garbage collection.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params ModuleApplyParams) (*mcp.CallToolResult, ModuleApplyResult, error) {
+		Name:        "wf_apply",
+		Description: "Apply a set of Kubernetes manifests as a named deployment in a namespace. Uses release labels for tracking and garbage collection.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params WorkflowApplyParams) (*mcp.CallToolResult, WorkflowApplyResult, error) {
 		if err := guard.CheckNamespace(params.Namespace); err != nil {
-			return nil, ModuleApplyResult{}, err
+			return nil, WorkflowApplyResult{}, err
 		}
-		result, err := handleModuleApply(ctx, client, params)
+		result, err := handleWorkflowApply(ctx, client, params)
 		return nil, result, err
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "module_remove",
-		Description: "Remove all resources belonging to a named release in a namespace.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params ModuleRemoveParams) (*mcp.CallToolResult, ModuleRemoveResult, error) {
+		Name:        "wf_remove",
+		Description: "Remove all resources belonging to a named deployment in a namespace.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params WorkflowRemoveParams) (*mcp.CallToolResult, WorkflowRemoveResult, error) {
 		if err := guard.CheckNamespace(params.Namespace); err != nil {
-			return nil, ModuleRemoveResult{}, err
+			return nil, WorkflowRemoveResult{}, err
 		}
-		result, err := handleModuleRemove(ctx, client, params)
+		result, err := handleWorkflowRemove(ctx, client, params)
 		return nil, result, err
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "module_status",
-		Description: "Get status of all resources belonging to a named release in a namespace.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params ModuleStatusParams) (*mcp.CallToolResult, ModuleStatusResult, error) {
+		Name:        "wf_status",
+		Description: "Get status of all resources belonging to a named deployment in a namespace.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params WorkflowStatusParams) (*mcp.CallToolResult, WorkflowStatusResult, error) {
 		if err := guard.CheckNamespace(params.Namespace); err != nil {
-			return nil, ModuleStatusResult{}, err
+			return nil, WorkflowStatusResult{}, err
 		}
-		result, err := handleModuleStatus(ctx, client, params)
+		result, err := handleWorkflowStatus(ctx, client, params)
 		return nil, result, err
 	})
 }
@@ -150,9 +150,9 @@ func resourceKey(gvr schema.GroupVersionResource, name string) string {
 	return fmt.Sprintf("%s/%s/%s", gvr.Group, gvr.Resource, name)
 }
 
-func handleModuleApply(ctx context.Context, client *k8s.Client, params ModuleApplyParams) (ModuleApplyResult, error) {
+func handleWorkflowApply(ctx context.Context, client *k8s.Client, params WorkflowApplyParams) (WorkflowApplyResult, error) {
 	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
-		return ModuleApplyResult{}, err
+		return WorkflowApplyResult{}, err
 	}
 
 	created, updated, deleted := 0, 0, 0
@@ -164,16 +164,16 @@ func handleModuleApply(ctx context.Context, client *k8s.Client, params ModuleApp
 		apiVersion := obj.GetAPIVersion()
 		kind := obj.GetKind()
 		if apiVersion == "" || kind == "" {
-			return ModuleApplyResult{}, fmt.Errorf("manifest missing apiVersion or kind")
+			return WorkflowApplyResult{}, fmt.Errorf("manifest missing apiVersion or kind")
 		}
 
 		if !allowedKinds[kind] {
-			return ModuleApplyResult{}, fmt.Errorf("kind %q is not permitted in module manifests; allowed kinds: Deployment, Service, PersistentVolumeClaim, NetworkPolicy, ConfigMap, Secret, Job, CronJob, Ingress", kind)
+			return WorkflowApplyResult{}, fmt.Errorf("kind %q is not permitted in workflow manifests; allowed kinds: Deployment, Service, PersistentVolumeClaim, NetworkPolicy, ConfigMap, Secret, Job, CronJob, Ingress", kind)
 		}
 
 		gvr, err := resolveGVR(ctx, client, apiVersion, kind)
 		if err != nil {
-			return ModuleApplyResult{}, fmt.Errorf("resolve GVR for %s/%s: %w", apiVersion, kind, err)
+			return WorkflowApplyResult{}, fmt.Errorf("resolve GVR for %s/%s: %w", apiVersion, kind, err)
 		}
 
 		// Set namespace and release label
@@ -182,12 +182,12 @@ func handleModuleApply(ctx context.Context, client *k8s.Client, params ModuleApp
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		labels[releaseLabelKey] = params.Release
+		labels[releaseLabelKey] = params.Name
 		obj.SetLabels(labels)
 
 		name := obj.GetName()
 		if name == "" {
-			return ModuleApplyResult{}, fmt.Errorf("manifest of kind %s is missing a name", kind)
+			return WorkflowApplyResult{}, fmt.Errorf("manifest of kind %s is missing a name", kind)
 		}
 
 		key := resourceKey(gvr, name)
@@ -199,17 +199,17 @@ func handleModuleApply(ctx context.Context, client *k8s.Client, params ModuleApp
 			// Create
 			_, createErr := client.Dynamic.Resource(gvr).Namespace(params.Namespace).Create(ctx, obj, metav1.CreateOptions{})
 			if createErr != nil {
-				return ModuleApplyResult{}, fmt.Errorf("create %s/%s: %w", kind, name, createErr)
+				return WorkflowApplyResult{}, fmt.Errorf("create %s/%s: %w", kind, name, createErr)
 			}
 			created++
 		} else if err != nil {
-			return ModuleApplyResult{}, fmt.Errorf("get %s/%s: %w", kind, name, err)
+			return WorkflowApplyResult{}, fmt.Errorf("get %s/%s: %w", kind, name, err)
 		} else {
 			// Update: preserve resource version
 			obj.SetResourceVersion(existing.GetResourceVersion())
 			_, updateErr := client.Dynamic.Resource(gvr).Namespace(params.Namespace).Update(ctx, obj, metav1.UpdateOptions{})
 			if updateErr != nil {
-				return ModuleApplyResult{}, fmt.Errorf("update %s/%s: %w", kind, name, updateErr)
+				return WorkflowApplyResult{}, fmt.Errorf("update %s/%s: %w", kind, name, updateErr)
 			}
 			updated++
 		}
@@ -229,7 +229,7 @@ func handleModuleApply(ctx context.Context, client *k8s.Client, params ModuleApp
 		{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
 	}
 
-	labelSelector := fmt.Sprintf("%s=%s", releaseLabelKey, params.Release)
+	labelSelector := fmt.Sprintf("%s=%s", releaseLabelKey, params.Name)
 	for _, gvr := range knownGVRs {
 		list, err := client.Dynamic.Resource(gvr).Namespace(params.Namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: labelSelector,
@@ -249,8 +249,8 @@ func handleModuleApply(ctx context.Context, client *k8s.Client, params ModuleApp
 		}
 	}
 
-	return ModuleApplyResult{
-		Release:   params.Release,
+	return WorkflowApplyResult{
+		Name:      params.Name,
 		Namespace: params.Namespace,
 		Created:   created,
 		Updated:   updated,
@@ -258,9 +258,9 @@ func handleModuleApply(ctx context.Context, client *k8s.Client, params ModuleApp
 	}, nil
 }
 
-func handleModuleRemove(ctx context.Context, client *k8s.Client, params ModuleRemoveParams) (ModuleRemoveResult, error) {
+func handleWorkflowRemove(ctx context.Context, client *k8s.Client, params WorkflowRemoveParams) (WorkflowRemoveResult, error) {
 	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
-		return ModuleRemoveResult{}, err
+		return WorkflowRemoveResult{}, err
 	}
 	knownGVRs := []schema.GroupVersionResource{
 		{Group: "apps", Version: "v1", Resource: "deployments"},
@@ -274,7 +274,7 @@ func handleModuleRemove(ctx context.Context, client *k8s.Client, params ModuleRe
 		{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
 	}
 
-	labelSelector := fmt.Sprintf("%s=%s", releaseLabelKey, params.Release)
+	labelSelector := fmt.Sprintf("%s=%s", releaseLabelKey, params.Name)
 	deleted := 0
 
 	for _, gvr := range knownGVRs {
@@ -293,16 +293,16 @@ func handleModuleRemove(ctx context.Context, client *k8s.Client, params ModuleRe
 		}
 	}
 
-	return ModuleRemoveResult{
-		Release:   params.Release,
+	return WorkflowRemoveResult{
+		Name:      params.Name,
 		Namespace: params.Namespace,
 		Deleted:   deleted,
 	}, nil
 }
 
-func handleModuleStatus(ctx context.Context, client *k8s.Client, params ModuleStatusParams) (ModuleStatusResult, error) {
+func handleWorkflowStatus(ctx context.Context, client *k8s.Client, params WorkflowStatusParams) (WorkflowStatusResult, error) {
 	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
-		return ModuleStatusResult{}, err
+		return WorkflowStatusResult{}, err
 	}
 	knownGVRs := []schema.GroupVersionResource{
 		{Group: "apps", Version: "v1", Resource: "deployments"},
@@ -316,8 +316,8 @@ func handleModuleStatus(ctx context.Context, client *k8s.Client, params ModuleSt
 		{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
 	}
 
-	labelSelector := fmt.Sprintf("%s=%s", releaseLabelKey, params.Release)
-	resources := []ModuleResourceStatus{}
+	labelSelector := fmt.Sprintf("%s=%s", releaseLabelKey, params.Name)
+	resources := []WorkflowResourceStatus{}
 
 	for _, gvr := range knownGVRs {
 		list, err := client.Dynamic.Resource(gvr).Namespace(params.Namespace).List(ctx, metav1.ListOptions{
@@ -328,7 +328,7 @@ func handleModuleStatus(ctx context.Context, client *k8s.Client, params ModuleSt
 		}
 		for _, item := range list.Items {
 			ready, reason := resourceReadiness(item, gvr.Resource)
-			resources = append(resources, ModuleResourceStatus{
+			resources = append(resources, WorkflowResourceStatus{
 				Kind:   strings.ToTitle(gvr.Resource[:1]) + gvr.Resource[1:],
 				Name:   item.GetName(),
 				Ready:  ready,
@@ -337,8 +337,8 @@ func handleModuleStatus(ctx context.Context, client *k8s.Client, params ModuleSt
 		}
 	}
 
-	return ModuleStatusResult{
-		Release:   params.Release,
+	return WorkflowStatusResult{
+		Name:      params.Name,
 		Namespace: params.Namespace,
 		Resources: resources,
 	}, nil

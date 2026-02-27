@@ -75,11 +75,11 @@ func (c *Client) AuditRBAC(ctx context.Context, namespace string) (interface{}, 
 func (c *Client) AuditNetpol(ctx context.Context, namespace string) (interface{}, error)
 func (c *Client) AuditPSA(ctx context.Context, namespace string) (interface{}, error)
 
-// ModuleApply calls the module_apply tool.
-func (c *Client) ModuleApply(ctx context.Context, namespace, release string, manifests []interface{}) (interface{}, error)
+// WorkflowApply calls the wf_apply tool.
+func (c *Client) WorkflowApply(ctx context.Context, namespace, name string, manifests []interface{}) (interface{}, error)
 
-// ModuleRemove calls the module_remove tool.
-func (c *Client) ModuleRemove(ctx context.Context, namespace, release string) (interface{}, error)
+// WorkflowRemove calls the wf_remove tool.
+func (c *Client) WorkflowRemove(ctx context.Context, namespace, name string) (interface{}, error)
 ```
 
 Each method constructs an MCP `tools/call` request, sends it to `<BaseURL>/mcp`,
@@ -231,7 +231,7 @@ if mcpURL != "" {
 
 **New flag**: `--mcp-url string` on the `install` command (line 27)
 
-**Change**: When `--mcp-url` is set, use `mcp.Client.ModuleApply()` to deploy
+**Change**: When `--mcp-url` is set, use `mcp.Client.WorkflowApply()` to deploy
 the module proxy manifests through the MCP server instead of calling
 `client.Apply()` directly.
 
@@ -239,8 +239,8 @@ the module proxy manifests through the MCP server instead of calling
 if mcpURL != "" {
     mcpClient := mcp.NewClient(mcpURL, mcpToken)
     manifests := k8s.GenerateModuleProxyManifests(image, proxyNamespace, storage, pvcSize)
-    // Convert builder.Manifest to unstructured objects for module_apply
-    result, err := mcpClient.ModuleApply(ctx, proxyNamespace, "esm-sh-proxy", convertedManifests)
+    // Convert builder.Manifest to unstructured objects for wf_apply
+    result, err := mcpClient.WorkflowApply(ctx, proxyNamespace, "esm-sh-proxy", convertedManifests)
     // ...
 }
 ```
@@ -496,6 +496,6 @@ tntc deploy --env production
 |-------------|-------------|
 | `cluster check` | `cluster_preflight` |
 | `cluster profile` | `cluster_profile` |
-| `cluster install` | `module_apply` |
+| `cluster install` | `wf_apply` |
 | `deploy` | `cred_kubeconfig` |
 | `audit` | `audit_rbac`, `audit_netpol`, `audit_psa` |

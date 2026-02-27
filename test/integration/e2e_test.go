@@ -619,13 +619,13 @@ func TestE2E_AuditRbacNetpolPsa(t *testing.T) {
 	t.Logf("audit_psa: compliant=%v enforce=%s", psaResult.Compliant, psaResult.Enforce)
 }
 
-// --- E2E: Module lifecycle ---
+// --- E2E: Workflow deploy lifecycle ---
 
-func TestE2E_ModuleApplyStatusRemove(t *testing.T) {
+func TestE2E_WorkflowApplyStatusRemove(t *testing.T) {
 	session, client, cleanup := e2eEnv(t)
 	defer cleanup()
 
-	nsName := "tnt-e2e-module"
+	nsName := "tnt-e2e-deploy"
 	cleanupNs(t, client, nsName)
 
 	callTool(t, session, "ns_create", map[string]any{
@@ -633,7 +633,7 @@ func TestE2E_ModuleApplyStatusRemove(t *testing.T) {
 		"quota_preset": "medium",
 	})
 
-	// module_apply with a ConfigMap (simplest resource to create).
+	// wf_apply with a ConfigMap (simplest resource to create).
 	manifests := []map[string]any{
 		{
 			"apiVersion": "v1",
@@ -647,72 +647,72 @@ func TestE2E_ModuleApplyStatusRemove(t *testing.T) {
 		},
 	}
 
-	text := callTool(t, session, "module_apply", map[string]any{
+	text := callTool(t, session, "wf_apply", map[string]any{
 		"namespace": nsName,
-		"release":   "test-app",
+		"name":      "test-app",
 		"manifests": manifests,
 	})
 	var applyResult struct {
-		Release   string `json:"release"`
+		Name      string `json:"name"`
 		Namespace string `json:"namespace"`
 		Created   int    `json:"created"`
 		Updated   int    `json:"updated"`
 		Deleted   int    `json:"deleted"`
 	}
 	if err := json.Unmarshal([]byte(text), &applyResult); err != nil {
-		t.Fatalf("unmarshal module_apply result: %v", err)
+		t.Fatalf("unmarshal wf_apply result: %v", err)
 	}
 	if applyResult.Created != 1 {
-		t.Errorf("module_apply created: got %d, want 1", applyResult.Created)
+		t.Errorf("wf_apply created: got %d, want 1", applyResult.Created)
 	}
-	if applyResult.Release != "test-app" {
-		t.Errorf("module_apply release: got %q, want test-app", applyResult.Release)
+	if applyResult.Name != "test-app" {
+		t.Errorf("wf_apply name: got %q, want test-app", applyResult.Name)
 	}
 
-	// module_status
-	text = callTool(t, session, "module_status", map[string]any{
+	// wf_status
+	text = callTool(t, session, "wf_status", map[string]any{
 		"namespace": nsName,
-		"release":   "test-app",
+		"name":      "test-app",
 	})
 	var statusResult struct {
-		Release   string `json:"release"`
+		Name      string `json:"name"`
 		Resources []struct {
 			Kind string `json:"kind"`
 			Name string `json:"name"`
 		} `json:"resources"`
 	}
 	if err := json.Unmarshal([]byte(text), &statusResult); err != nil {
-		t.Fatalf("unmarshal module_status result: %v", err)
+		t.Fatalf("unmarshal wf_status result: %v", err)
 	}
 	if len(statusResult.Resources) != 1 {
-		t.Errorf("module_status resources: got %d, want 1", len(statusResult.Resources))
+		t.Errorf("wf_status resources: got %d, want 1", len(statusResult.Resources))
 	}
 
-	// module_apply again (update, should be idempotent).
-	text = callTool(t, session, "module_apply", map[string]any{
+	// wf_apply again (update, should be idempotent).
+	text = callTool(t, session, "wf_apply", map[string]any{
 		"namespace": nsName,
-		"release":   "test-app",
+		"name":      "test-app",
 		"manifests": manifests,
 	})
 	if err := json.Unmarshal([]byte(text), &applyResult); err != nil {
-		t.Fatalf("unmarshal module_apply update result: %v", err)
+		t.Fatalf("unmarshal wf_apply update result: %v", err)
 	}
 	// Second apply should update, not create.
-	t.Logf("module_apply update: created=%d updated=%d", applyResult.Created, applyResult.Updated)
+	t.Logf("wf_apply update: created=%d updated=%d", applyResult.Created, applyResult.Updated)
 
-	// module_remove
-	text = callTool(t, session, "module_remove", map[string]any{
+	// wf_remove
+	text = callTool(t, session, "wf_remove", map[string]any{
 		"namespace": nsName,
-		"release":   "test-app",
+		"name":      "test-app",
 	})
 	var removeResult struct {
-		Release string `json:"release"`
+		Name    string `json:"name"`
 		Deleted int    `json:"deleted"`
 	}
 	if err := json.Unmarshal([]byte(text), &removeResult); err != nil {
-		t.Fatalf("unmarshal module_remove result: %v", err)
+		t.Fatalf("unmarshal wf_remove result: %v", err)
 	}
 	if removeResult.Deleted != 1 {
-		t.Errorf("module_remove deleted: got %d, want 1", removeResult.Deleted)
+		t.Errorf("wf_remove deleted: got %d, want 1", removeResult.Deleted)
 	}
 }

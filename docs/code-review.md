@@ -73,9 +73,9 @@ Every namespace-accepting tool correctly calls `guard.CheckNamespace()` before a
 | gvisor_check | (none) | N/A - cluster-scoped |
 | gvisor_apply | params.Namespace | YES |
 | gvisor_verify | params.Namespace | YES |
-| module_apply | params.Namespace | YES |
-| module_remove | params.Namespace | YES |
-| module_status | params.Namespace | YES |
+| wf_apply | params.Namespace | YES |
+| wf_remove | params.Namespace | YES |
+| wf_status | params.Namespace | YES |
 | health_nodes | (none) | N/A - cluster-scoped |
 | health_ns_usage | params.Namespace | YES |
 | health_cluster_summary | (none) | N/A - cluster-scoped |
@@ -91,10 +91,10 @@ Every namespace-accepting tool correctly calls `guard.CheckNamespace()` before a
 | H2 | High | NewClientFromConfig missing Dynamic client init |
 | H4 | High | Logger param unused in register.go -- no structured logging in tool handlers |
 | H5 | High | ns_list never populates quota_preset field |
-| H6 | High | module_apply Get error too broad -- treats all errors as "not found" (line 201-202) |
+| H6 | High | wf_apply Get error too broad -- treats all errors as "not found" (line 201-202) |
 | H7 | High | audit_rbac flags tentacular's own managed role for secrets access |
 | M1-M9 | Medium | See detailed findings below |
-| M5+ | Medium | knownGVRs missing `ingresses` and `persistentvolumeclaims` in all 3 module functions -- GC, remove, and status will miss these resource types even though allowedKinds permits them |
+| M5+ | Medium | knownGVRs missing `ingresses` and `persistentvolumeclaims` in all 3 workflow functions -- GC, remove, and status will miss these resource types even though allowedKinds permits them |
 | L1-L5 | Low | See detailed findings below |
 
 ### Phase 2 Summary
@@ -103,16 +103,16 @@ Every namespace-accepting tool correctly calls `guard.CheckNamespace()` before a
 
 **High-priority items remaining (5):**
 - **H1** (`health.go:168-169`): Returns error on missing quota; spec says return "unlimited"
-- **H2** (`client.go:60-65`): `NewClientFromConfig` missing Dynamic client -- nil-pointer risk for module tool tests
+- **H2** (`client.go:60-65`): `NewClientFromConfig` missing Dynamic client -- nil-pointer risk for deploy tool tests
 - **H4** (`register.go:12`): Logger accepted but unused -- no structured logging in any tool handler
 - **H5** (`namespace.go:243-260`): `ns_list` never populates `quota_preset` -- field always empty
-- **H6** (`module.go:201-202`): Get error handling treats any error as "not found" instead of checking `apierrors.IsNotFound`
+- **H6** (`deploy.go:201-202`): Get error handling treats any error as "not found" instead of checking `apierrors.IsNotFound` (affects wf_apply)
 
 **Downgraded (1):**
 - **H7** -> Medium: audit_rbac flagging tentacular's own role is annoying but not a functional bug. The audit results are still correct; they just include expected findings.
 
 **New observation:**
-- **M5 expanded**: `allowedKinds` now permits `Ingress` and `PersistentVolumeClaim`, but the `knownGVRs` lists in `handleModuleApply` (line 222-230), `handleModuleRemove` (line 262-270), and `handleModuleStatus` (line 299-307) still omit these types. This means Ingresses and PVCs deployed via module_apply will not be garbage-collected on update, not removed by module_remove, and not shown by module_status.
+- **M5 expanded**: `allowedKinds` now permits `Ingress` and `PersistentVolumeClaim`, but the `knownGVRs` lists in `handleWorkflowApply` (line 222-230), `handleWorkflowRemove` (line 262-270), and `handleWorkflowStatus` (line 299-307) still omit these types. This means Ingresses and PVCs deployed via wf_apply will not be garbage-collected on update, not removed by wf_remove, and not shown by wf_status.
 
 **Total remaining:** 0 Critical, 5 High, 10 Medium, 5 Low
 
@@ -162,15 +162,15 @@ Since `ns_create` sets PSA enforce to `restricted`, any pod without these fields
 
 **Fix:** Add a complete restricted-compliant security context to the pod spec and container spec. Note that `dmesg` requires elevated privileges, so either: (a) use a different verification command that works under restricted PSA (e.g., `uname -r` which shows "gvisor" in the kernel version), or (b) document that gvisor_verify only works in namespaces with baseline/privileged PSA.
 
-### C3. `pkg/tools/module.go:138-200` -- module_apply does not validate manifest content, enabling injection of cluster-scoped resources
+### C3. `pkg/tools/deploy.go:138-200` -- wf_apply does not validate manifest content, enabling injection of cluster-scoped resources
 
 **Severity:** Critical
 
-`handleModuleApply` calls `obj.SetNamespace(params.Namespace)` but does not validate that the manifest Kind is namespace-scoped. A caller could pass cluster-scoped resources (e.g., ClusterRole, Namespace, Node) as manifests. While the dynamic client would attempt to create them namespace-scoped (which would fail for truly cluster-scoped resources), this is not explicitly validated and the error messages would be confusing.
+`handleWorkflowApply` calls `obj.SetNamespace(params.Namespace)` but does not validate that the manifest Kind is namespace-scoped. A caller could pass cluster-scoped resources (e.g., ClusterRole, Namespace, Node) as manifests. While the dynamic client would attempt to create them namespace-scoped (which would fail for truly cluster-scoped resources), this is not explicitly validated and the error messages would be confusing.
 
 More importantly, there is no validation of the `apiVersion`/`kind` against an allowlist. A malicious or buggy caller could attempt to create resources the ClusterRole grants access to at cluster scope.
 
-**Fix:** Add an allowlist of permitted resource types for module_apply (deployments, services, configmaps, secrets, jobs, cronjobs, networkpolicies, ingresses) matching the knownGVRs list. Reject manifests with kinds not in the allowlist.
+**Fix:** Add an allowlist of permitted resource types for wf_apply (deployments, services, configmaps, secrets, jobs, cronjobs, networkpolicies, ingresses) matching the knownGVRs list. Reject manifests with kinds not in the allowlist.
 
 ### C4. `pkg/auth/auth.go:44` -- Token comparison is not constant-time
 
@@ -207,7 +207,7 @@ The spec says: "The system returns usage figures with limits shown as 'unlimited
 **Spec ref:** design.md section D8
 
 Several resources identified in D8 are missing from the ClusterRole:
-- Missing `networking.k8s.io/ingresses` with `create,update,delete,get,list` (needed by module_apply and cluster_profile)
+- Missing `networking.k8s.io/ingresses` with `create,update,delete,get,list` (needed by wf_apply and cluster_profile)
 - Missing `""` / `serviceaccounts` / `patch,update` verbs (only has create,get,list,delete)
 - Missing `""` / `pods,events` / `watch` verb
 - Missing `apps/replicasets,daemonsets,statefulsets` with `get,list` (needed by cluster_profile per D8)
@@ -222,7 +222,7 @@ Several resources identified in D8 are missing from the ClusterRole:
 
 **Severity:** High
 
-`RegisterAll` accepts a `*slog.Logger` parameter but never passes it to any registration function. None of the tool handlers have access to structured logging. This means errors during tool execution (especially partial failures in ns_create, GC errors in module_apply) are silent.
+`RegisterAll` accepts a `*slog.Logger` parameter but never passes it to any registration function. None of the tool handlers have access to structured logging. This means errors during tool execution (especially partial failures in ns_create, GC errors in wf_apply) are silent.
 
 **Fix:** Either pass the logger to each `register*Tools` function and use it for non-fatal error logging, or remove the parameter to avoid confusion.
 
@@ -235,7 +235,7 @@ The API contract specifies `quota_preset` in the ns_list output, but the impleme
 
 **Fix:** Either store the quota_preset as a label/annotation on the namespace during ns_create (so ns_list can read it back), or derive it by comparing quota values to known presets.
 
-### H6. `pkg/tools/module.go:182-199` -- module_apply error handling on Get is too broad
+### H6. `pkg/tools/deploy.go:182-199` -- wf_apply error handling on Get is too broad
 
 **Severity:** High
 
@@ -287,15 +287,15 @@ The polling loop for pod completion checks `time.Now().Before(deadline)` but doe
 
 **Fix:** Add a `LimitReader` wrapper around the stream (e.g., 10MB max) to prevent unbounded memory usage.
 
-### M5. `pkg/tools/module.go:204-212` -- knownGVRs for garbage collection is hardcoded and incomplete
+### M5. `pkg/tools/deploy.go:204-212` -- knownGVRs for garbage collection is hardcoded and incomplete
 
 **Severity:** Medium
 
-The `knownGVRs` list used for garbage collection is hardcoded and does not include `ingresses`. If a module deploys an Ingress resource, it will never be garbage-collected on update.
+The `knownGVRs` list used for garbage collection is hardcoded and does not include `ingresses`. If a workflow deploys an Ingress resource, it will never be garbage-collected on update.
 
-**Fix:** Add `{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}` to the knownGVRs lists in all three functions (handleModuleApply, handleModuleRemove, handleModuleStatus).
+**Fix:** Add `{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}` to the knownGVRs lists in all three functions (handleWorkflowApply, handleWorkflowRemove, handleWorkflowStatus).
 
-### M6. `pkg/tools/module.go:304` -- module_status uses `strings.ToTitle` incorrectly for Kind display
+### M6. `pkg/tools/deploy.go:304` -- wf_status uses `strings.ToTitle` incorrectly for Kind display
 
 **Severity:** Medium
 

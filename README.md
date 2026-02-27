@@ -148,13 +148,13 @@ curl http://localhost:8080/healthz
 | `gvisor_apply` | Apply gVisor annotation to a namespace. |
 | `gvisor_verify` | Run a verification pod to confirm gVisor sandbox isolation is functional. |
 
-### Module Proxy
+### Deploy Lifecycle
 
 | Tool | Description |
 |------|-------------|
-| `module_apply` | Apply arbitrary Kubernetes manifests as a labeled release using the dynamic client. Tracks resources by release label for garbage collection. |
-| `module_remove` | Remove all resources associated with a release label. |
-| `module_status` | Check the status of all resources in a release. |
+| `wf_apply` | Apply arbitrary Kubernetes manifests as a named deployment using the dynamic client. Tracks resources by name label for garbage collection. |
+| `wf_remove` | Remove all resources associated with a deployment name. |
+| `wf_status` | Check the status of all resources in a named deployment. |
 
 ### Cluster Health
 
@@ -282,7 +282,7 @@ pkg/auth/                     Bearer token middleware
 pkg/guard/                    Self-protection namespace guard
 pkg/k8s/                      Kubernetes client and operations
 pkg/server/                   MCP server setup and HTTP handler
-pkg/tools/                    24 MCP tool handlers (one file per group)
+pkg/tools/                    25 MCP tool handlers (one file per group)
 deploy/manifests/             Kustomize-based deployment manifests
 test/integration/             Integration tests (kind cluster)
 test/e2e/                     E2E tests (production cluster)
