@@ -8,35 +8,38 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/randybias/tentacular-mcp/pkg/auth"
 	"github.com/randybias/tentacular-mcp/pkg/k8s"
+	"github.com/randybias/tentacular-mcp/pkg/proxy"
 	"github.com/randybias/tentacular-mcp/pkg/tools"
 )
 
 // Server wraps the MCP server with K8s client and auth.
 type Server struct {
-	mcpServer *mcp.Server
-	client    *k8s.Client
-	token     string
-	logger    *slog.Logger
+	mcpServer  *mcp.Server
+	client     *k8s.Client
+	reconciler *proxy.Reconciler
+	token      string
+	logger     *slog.Logger
 }
 
 // New creates a new MCP server with all tools registered.
-func New(client *k8s.Client, token string, logger *slog.Logger) (*Server, error) {
+func New(client *k8s.Client, reconciler *proxy.Reconciler, token string, logger *slog.Logger) (*Server, error) {
 	mcpServer := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "tentacular-mcp",
 			Version: "0.1.0",
 		},
 		&mcp.ServerOptions{
-			Instructions: "In-cluster MCP server for Kubernetes namespace lifecycle, credential management, workflow introspection, and cluster operations.",
+			Instructions: "In-cluster MCP server for Kubernetes namespace lifecycle, credential management, workflow introspection, cluster operations, and module proxy management.",
 			Logger:       logger,
 		},
 	)
 
 	s := &Server{
-		mcpServer: mcpServer,
-		client:    client,
-		token:     token,
-		logger:    logger,
+		mcpServer:  mcpServer,
+		client:     client,
+		reconciler: reconciler,
+		token:      token,
+		logger:     logger,
 	}
 
 	s.registerTools()
@@ -68,5 +71,5 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 
 // registerTools registers all MCP tools by delegating to the tools package.
 func (s *Server) registerTools() {
-	tools.RegisterAll(s.mcpServer, s.client, s.logger)
+	tools.RegisterAll(s.mcpServer, s.client, s.reconciler, s.logger)
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/randybias/tentacular-mcp/pkg/auth"
 	"github.com/randybias/tentacular-mcp/pkg/k8s"
+	"github.com/randybias/tentacular-mcp/pkg/proxy"
 	"github.com/randybias/tentacular-mcp/pkg/server"
 )
 
@@ -37,7 +38,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv, err := server.New(client, token, logger)
+	proxyOpts := proxy.Options{
+		Namespace:   os.Getenv("PROXY_NAMESPACE"),
+		Image:       os.Getenv("PROXY_IMAGE"),
+		StorageSize: os.Getenv("PROXY_STORAGE_SIZE"),
+	}
+	if proxyOpts.Namespace == "" {
+		proxyOpts.Namespace = "tentacular-system"
+	}
+
+	reconciler := proxy.NewReconciler(client, proxyOpts, logger)
+
+	srv, err := server.New(client, reconciler, token, logger)
 	if err != nil {
 		slog.Error("failed to create MCP server", "error", err)
 		os.Exit(1)
@@ -58,6 +70,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Start module proxy reconciliation loop as a background goroutine
+	go reconciler.Run(ctx)
 
 	go func() {
 		slog.Info("starting tentacular-mcp server", "addr", addr)

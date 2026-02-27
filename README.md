@@ -57,7 +57,19 @@ Developer workstations holding cluster-wide admin kubeconfig is a security anti-
 
 ## Quick Start
 
-### Build
+### Deploy via tntc CLI (Recommended)
+
+The easiest way to deploy tentacular-mcp is through the
+`tntc` CLI bootstrap command:
+
+```bash
+tntc cluster install
+```
+
+This auto-generates a token, deploys the server, and
+saves the MCP config to `~/.tentacular/config.yaml`.
+
+### Build from Source
 
 ```bash
 # Build the binary
@@ -67,17 +79,9 @@ make build
 make docker-build
 ```
 
-### Generate Auth Token
+### Manual Deploy (Kustomize)
 
-```bash
-# Generate a random Bearer token
-TOKEN=$(openssl rand -hex 32)
-
-# Patch the auth secret manifest
-sed -i "s/REPLACE_ME_WITH_GENERATED_TOKEN/${TOKEN}/" deploy/manifests/auth-secret.yaml
-```
-
-### Deploy
+For manual deployment without the tntc CLI:
 
 ```bash
 kubectl apply -k deploy/manifests/
@@ -86,7 +90,7 @@ kubectl apply -k deploy/manifests/
 This creates:
 - `tentacular-system` namespace
 - ServiceAccount, ClusterRole, and ClusterRoleBinding
-- Auth Secret (mounted as a volume)
+- Auth Secret
 - Deployment (single replica, distroless container, non-root)
 - ClusterIP Service on port 8080
 
@@ -105,7 +109,7 @@ curl http://localhost:8080/healthz
 
 ## MCP Tools
 
-25 tools organized across 8 functional groups. All namespace-scoped tools enforce a self-protection guard that rejects operations targeting `tentacular-system`.
+28 tools organized across 10 functional groups. All namespace-scoped tools enforce a self-protection guard that rejects operations targeting `tentacular-system`.
 
 ### Namespace Lifecycle
 
@@ -156,6 +160,18 @@ curl http://localhost:8080/healthz
 | `wf_remove` | Remove all resources associated with a deployment name. |
 | `wf_status` | Check the status of all resources in a named deployment. |
 
+### Workflow Execution
+
+| Tool | Description |
+|------|-------------|
+| `wf_run` | Trigger a deployed workflow by creating an ephemeral in-cluster curl pod that POSTs to the workflow's `/run` endpoint. Returns the JSON output with execution duration. Timeout configurable (default 120s, max 600s). Pod is auto-cleaned after execution. |
+
+### Module Proxy
+
+| Tool | Description |
+|------|-------------|
+| `proxy_status` | Check installation and readiness status of the in-cluster module proxy (esm.sh). Returns installed state, readiness, namespace, image, and storage type. |
+
 ### Cluster Health
 
 | Tool | Description |
@@ -176,7 +192,7 @@ curl http://localhost:8080/healthz
 
 All requests to `/mcp` require a `Authorization: Bearer <token>` header. The `/healthz` endpoint is unauthenticated.
 
-The server loads its expected token from a file path configured via the `TOKEN_PATH` environment variable (default: `/etc/tentacular-mcp/token`). In the standard deployment, this is mounted from the `tentacular-mcp-auth` Kubernetes Secret.
+The server loads its expected token from the `TENTACULAR_MCP_TOKEN` environment variable. In the standard deployment, this is populated from the `tentacular-mcp-token` Kubernetes Secret via `secretKeyRef`.
 
 ### Generating a Token
 
@@ -185,16 +201,13 @@ The server loads its expected token from a file path configured via the `TOKEN_P
 openssl rand -hex 32
 ```
 
-Update the Secret in `deploy/manifests/auth-secret.yaml` with the generated value, then redeploy:
-
-```bash
-kubectl apply -k deploy/manifests/
-```
+When deployed via `tntc cluster install`, the token is
+auto-generated and saved to `~/.tentacular/mcp-token`.
 
 ### Retrieving a Deployed Token
 
 ```bash
-kubectl get secret tentacular-mcp-auth -n tentacular-system \
+kubectl get secret tentacular-mcp-token -n tentacular-system \
   -o jsonpath='{.data.token}' | base64 -d
 ```
 
@@ -281,8 +294,9 @@ cmd/tentacular-mcp/main.go   Entry point with graceful shutdown
 pkg/auth/                     Bearer token middleware
 pkg/guard/                    Self-protection namespace guard
 pkg/k8s/                      Kubernetes client and operations
+pkg/proxy/                    Module proxy reconciler and manifests
 pkg/server/                   MCP server setup and HTTP handler
-pkg/tools/                    25 MCP tool handlers (one file per group)
+pkg/tools/                    28 MCP tool handlers (one file per group)
 deploy/manifests/             Kustomize-based deployment manifests
 test/integration/             Integration tests (kind cluster)
 test/e2e/                     E2E tests (production cluster)
@@ -293,7 +307,8 @@ test/e2e/                     E2E tests (production cluster)
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `LISTEN_ADDR` | `:8080` | Address and port the HTTP server binds to |
-| `TOKEN_PATH` | `/etc/tentacular-mcp/token` | File path to the Bearer auth token |
+| `TENTACULAR_MCP_TOKEN` | (required) | Bearer auth token for client authentication |
+| `TENTACULAR_MCP_NAMESPACE` | `tentacular-system` | Namespace the MCP server is installed in |
 
 ## Security Model
 
@@ -333,22 +348,33 @@ The Deployment runs with:
 
 ## CLI Integration
 
-The tentacular CLI (`tntc`) can optionally delegate cluster operations to this MCP server using the `--mcp-url` flag or the `mcp_url` config field. When set, the CLI communicates through the MCP server instead of direct kube-api access.
+The tentacular CLI (`tntc`) routes all cluster operations
+through this MCP server. After `tntc cluster install`
+bootstraps the server, the MCP endpoint and token are
+saved to `~/.tentacular/config.yaml`. All subsequent
+CLI commands automatically use the MCP server -- no
+per-command flags needed.
 
-For full details, see [docs/cli-integration.md](docs/cli-integration.md).
+`tntc cluster install` is the **only** CLI command that
+communicates directly with the Kubernetes API. All other
+cluster-facing commands (deploy, run, list, status, logs,
+undeploy, audit, cluster check) route through MCP.
 
-### Port-Forward Access
+### MCP Tools Used by CLI
 
-```bash
-kubectl port-forward -n tentacular-system svc/tentacular-mcp 8080:8080 &
-tntc cluster check --mcp-url http://localhost:8080
-```
+| CLI Command | MCP Tool(s) |
+|-------------|-------------|
+| `cluster check` | `cluster_preflight` |
+| `deploy` | `wf_apply`, `ns_create` |
+| `run` | `wf_run` |
+| `list` | `wf_list` |
+| `status` | `wf_status` |
+| `logs` | `wf_logs` |
+| `undeploy` | `wf_remove` |
+| `audit` | `audit_rbac`, `audit_netpol`, `audit_psa` |
 
-### In-Cluster Access
-
-```bash
-tntc cluster check --mcp-url http://tentacular-mcp.tentacular-system.svc:8080
-```
+For the original design document, see
+[docs/cli-integration.md](docs/cli-integration.md).
 
 ## Contributing
 
