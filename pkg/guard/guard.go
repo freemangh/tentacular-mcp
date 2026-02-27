@@ -2,14 +2,23 @@ package guard
 
 import "fmt"
 
-const protectedNamespace = "tentacular-system"
+// systemNamespaces is the set of namespaces that tentacular must never touch.
+// These are either Kubernetes control-plane namespaces or the tentacular
+// server's own namespace.
+var systemNamespaces = map[string]bool{
+	"tentacular-system": true,
+	"kube-system":       true,
+	"kube-public":       true,
+	"kube-node-lease":   true,
+	"default":           true,
+}
 
-// CheckNamespace returns an error if the given namespace is the protected
-// tentacular-system namespace. All tool handlers must call this before
-// performing operations.
+// CheckNamespace returns an error if the given namespace is a protected
+// system namespace. All tool handlers must call this before performing
+// operations.
 func CheckNamespace(namespace string) error {
-	if namespace == protectedNamespace {
-		return fmt.Errorf("operations on namespace %q are not allowed", protectedNamespace)
+	if systemNamespaces[namespace] {
+		return fmt.Errorf("operations on namespace %q are not permitted", namespace)
 	}
 	return nil
 }

@@ -82,6 +82,9 @@ func registerCredentialTools(srv *mcp.Server, client *k8s.Client) {
 }
 
 func handleCredIssueToken(ctx context.Context, client *k8s.Client, params CredIssueTokenParams) (CredIssueTokenResult, error) {
+	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
+		return CredIssueTokenResult{}, err
+	}
 	if params.TTLMinutes < 10 || params.TTLMinutes > 1440 {
 		return CredIssueTokenResult{}, fmt.Errorf("TTL must be between 10 and 1440 minutes, got %d", params.TTLMinutes)
 	}
@@ -100,6 +103,9 @@ func handleCredIssueToken(ctx context.Context, client *k8s.Client, params CredIs
 }
 
 func handleCredKubeconfig(ctx context.Context, client *k8s.Client, params CredKubeconfigParams) (CredKubeconfigResult, error) {
+	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
+		return CredKubeconfigResult{}, err
+	}
 	if params.TTLMinutes < 10 || params.TTLMinutes > 1440 {
 		return CredKubeconfigResult{}, fmt.Errorf("TTL must be between 10 and 1440 minutes, got %d", params.TTLMinutes)
 	}
@@ -121,6 +127,9 @@ func handleCredKubeconfig(ctx context.Context, client *k8s.Client, params CredKu
 }
 
 func handleCredRotate(ctx context.Context, client *k8s.Client, params CredRotateParams) (CredRotateResult, error) {
+	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
+		return CredRotateResult{}, err
+	}
 	if err := k8s.RecreateWorkflowServiceAccount(ctx, client, params.Namespace); err != nil {
 		return CredRotateResult{}, fmt.Errorf("rotate service account in namespace %q: %w", params.Namespace, err)
 	}

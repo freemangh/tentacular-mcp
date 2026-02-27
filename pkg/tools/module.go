@@ -151,13 +151,8 @@ func resourceKey(gvr schema.GroupVersionResource, name string) string {
 }
 
 func handleModuleApply(ctx context.Context, client *k8s.Client, params ModuleApplyParams) (ModuleApplyResult, error) {
-	// Verify namespace is managed
-	ns, err := k8s.GetNamespace(ctx, client, params.Namespace)
-	if err != nil {
+	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
 		return ModuleApplyResult{}, err
-	}
-	if !k8s.IsManagedNamespace(ns) {
-		return ModuleApplyResult{}, fmt.Errorf("namespace %q is not managed by tentacular", params.Namespace)
 	}
 
 	created, updated, deleted := 0, 0, 0
@@ -264,6 +259,9 @@ func handleModuleApply(ctx context.Context, client *k8s.Client, params ModuleApp
 }
 
 func handleModuleRemove(ctx context.Context, client *k8s.Client, params ModuleRemoveParams) (ModuleRemoveResult, error) {
+	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
+		return ModuleRemoveResult{}, err
+	}
 	knownGVRs := []schema.GroupVersionResource{
 		{Group: "apps", Version: "v1", Resource: "deployments"},
 		{Group: "", Version: "v1", Resource: "services"},
@@ -303,6 +301,9 @@ func handleModuleRemove(ctx context.Context, client *k8s.Client, params ModuleRe
 }
 
 func handleModuleStatus(ctx context.Context, client *k8s.Client, params ModuleStatusParams) (ModuleStatusResult, error) {
+	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
+		return ModuleStatusResult{}, err
+	}
 	knownGVRs := []schema.GroupVersionResource{
 		{Group: "apps", Version: "v1", Resource: "deployments"},
 		{Group: "", Version: "v1", Resource: "services"},

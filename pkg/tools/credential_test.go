@@ -14,8 +14,18 @@ import (
 )
 
 func newCredTestClient() *k8s.Client {
+	mkNs := func(name string) *corev1.Namespace {
+		return &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   name,
+				Labels: map[string]string{k8s.ManagedByLabel: k8s.ManagedByValue},
+			},
+		}
+	}
 	return &k8s.Client{
-		Clientset: fake.NewSimpleClientset(),
+		Clientset: fake.NewSimpleClientset(
+			mkNs("test-ns"), mkNs("my-ns"), mkNs("rotate-ns"), mkNs("fresh-ns"),
+		),
 		Config: &rest.Config{
 			Host: "https://test-cluster:6443",
 			TLSClientConfig: rest.TLSClientConfig{
@@ -157,6 +167,44 @@ func TestCredRotateMessageContent(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "tentacular-workflow") {
 		t.Errorf("expected message to mention SA name, got: %q", result.Message)
+	}
+}
+
+func TestCredIssueTokenUnmanagedNamespace(t *testing.T) {
+	client := newCredTestClient()
+	ctx := context.Background()
+
+	// Create the namespace without the managed-by label so CheckManagedNamespace
+	// returns "not managed by tentacular" (not a "not found" error).
+	client.Clientset.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "unmanaged-ns"},
+	}, metav1.CreateOptions{})
+
+	_, err := handleCredIssueToken(ctx, client, CredIssueTokenParams{Namespace: "unmanaged-ns", TTLMinutes: 60})
+	if err == nil {
+		t.Fatal("expected error for unmanaged namespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "not managed by tentacular") {
+		t.Errorf("expected adoption hint in error, got: %v", err)
+	}
+}
+
+func TestCredRotateUnmanagedNamespace(t *testing.T) {
+	client := newCredTestClient()
+	ctx := context.Background()
+
+	// Create the namespace without the managed-by label so CheckManagedNamespace
+	// returns "not managed by tentacular" (not a "not found" error).
+	client.Clientset.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "unmanaged-ns"},
+	}, metav1.CreateOptions{})
+
+	_, err := handleCredRotate(ctx, client, CredRotateParams{Namespace: "unmanaged-ns"})
+	if err == nil {
+		t.Fatal("expected error for unmanaged namespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "not managed by tentacular") {
+		t.Errorf("expected adoption hint in error, got: %v", err)
 	}
 }
 

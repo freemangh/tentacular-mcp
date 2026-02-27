@@ -38,10 +38,19 @@ func moduleScheme() *runtime.Scheme {
 	return scheme
 }
 
+func managedNs(name string) *corev1.Namespace {
+	return &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{k8s.ManagedByLabel: k8s.ManagedByValue},
+		},
+	}
+}
+
 func newModuleTestClient() *k8s.Client {
 	scheme := moduleScheme()
 	dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, moduleGVRs)
-	staticClient := kubefake.NewSimpleClientset()
+	staticClient := kubefake.NewSimpleClientset(managedNs("my-ns"), managedNs("test-ns"))
 
 	return &k8s.Client{
 		Clientset: staticClient,
@@ -53,7 +62,7 @@ func newModuleTestClient() *k8s.Client {
 func newManagedNsClient() *k8s.Client {
 	scheme := moduleScheme()
 	dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, moduleGVRs)
-	staticClient := kubefake.NewSimpleClientset()
+	staticClient := kubefake.NewSimpleClientset(managedNs("my-ns"), managedNs("test-ns"))
 
 	return &k8s.Client{
 		Clientset: staticClient,

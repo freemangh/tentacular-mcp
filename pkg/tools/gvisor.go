@@ -107,13 +107,8 @@ func handleGVisorCheck(ctx context.Context, client *k8s.Client) (GVisorCheckResu
 }
 
 func handleGVisorApply(ctx context.Context, client *k8s.Client, params GVisorApplyParams) (GVisorApplyResult, error) {
-	// Verify namespace is managed
-	ns, err := k8s.GetNamespace(ctx, client, params.Namespace)
-	if err != nil {
+	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
 		return GVisorApplyResult{}, err
-	}
-	if !k8s.IsManagedNamespace(ns) {
-		return GVisorApplyResult{}, fmt.Errorf("namespace %q is not managed by tentacular", params.Namespace)
 	}
 
 	// Verify gVisor RuntimeClass exists
@@ -149,6 +144,9 @@ func handleGVisorApply(ctx context.Context, client *k8s.Client, params GVisorApp
 }
 
 func handleGVisorVerify(ctx context.Context, client *k8s.Client, params GVisorVerifyParams) (GVisorVerifyResult, error) {
+	if err := k8s.CheckManagedNamespace(ctx, client, params.Namespace); err != nil {
+		return GVisorVerifyResult{}, err
+	}
 	// Find the gVisor RuntimeClass
 	checkResult, err := handleGVisorCheck(ctx, client)
 	if err != nil {

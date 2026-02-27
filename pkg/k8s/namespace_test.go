@@ -2,6 +2,7 @@ package k8s_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -139,6 +140,47 @@ func TestDeleteNamespace_Success(t *testing.T) {
 func TestDeleteNamespace_NotFound(t *testing.T) {
 	_, client := newFakeK8sClient()
 	err := k8s.DeleteNamespace(context.Background(), client, "ghost-ns")
+	if err == nil {
+		t.Error("expected error for non-existent namespace, got nil")
+	}
+}
+
+func TestCheckManagedNamespace_Managed(t *testing.T) {
+	cs, client := newFakeK8sClient()
+	ctx := context.Background()
+
+	cs.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "managed-ns",
+			Labels: map[string]string{k8s.ManagedByLabel: k8s.ManagedByValue},
+		},
+	}, metav1.CreateOptions{})
+
+	if err := k8s.CheckManagedNamespace(ctx, client, "managed-ns"); err != nil {
+		t.Errorf("expected no error for managed namespace, got: %v", err)
+	}
+}
+
+func TestCheckManagedNamespace_Unmanaged(t *testing.T) {
+	cs, client := newFakeK8sClient()
+	ctx := context.Background()
+
+	cs.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "unmanaged-ns"},
+	}, metav1.CreateOptions{})
+
+	err := k8s.CheckManagedNamespace(ctx, client, "unmanaged-ns")
+	if err == nil {
+		t.Error("expected error for unmanaged namespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "not managed by tentacular") {
+		t.Errorf("expected adoption hint in error, got: %v", err)
+	}
+}
+
+func TestCheckManagedNamespace_NotFound(t *testing.T) {
+	_, client := newFakeK8sClient()
+	err := k8s.CheckManagedNamespace(context.Background(), client, "ghost-ns")
 	if err == nil {
 		t.Error("expected error for non-existent namespace, got nil")
 	}

@@ -87,3 +87,17 @@ func IsManagedNamespace(ns *corev1.Namespace) bool {
 	}
 	return ns.Labels[ManagedByLabel] == ManagedByValue
 }
+
+// CheckManagedNamespace fetches the namespace and returns an error if it is
+// not managed by tentacular. Use this in write handlers to prevent operating
+// on namespaces tentacular did not create (or adopt).
+func CheckManagedNamespace(ctx context.Context, client *Client, name string) error {
+	ns, err := GetNamespace(ctx, client, name)
+	if err != nil {
+		return err
+	}
+	if !IsManagedNamespace(ns) {
+		return fmt.Errorf("namespace %q is not managed by tentacular; add label %s=%s to adopt it", name, ManagedByLabel, ManagedByValue)
+	}
+	return nil
+}

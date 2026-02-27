@@ -6,23 +6,30 @@ import (
 	"github.com/randybias/tentacular-mcp/pkg/guard"
 )
 
-func TestCheckNamespace_ProtectedRejected(t *testing.T) {
-	err := guard.CheckNamespace("tentacular-system")
-	if err == nil {
-		t.Error("expected error for tentacular-system, got nil")
+func TestCheckNamespace_SystemNamespacesRejected(t *testing.T) {
+	blocked := []string{
+		"tentacular-system",
+		"kube-system",
+		"kube-public",
+		"kube-node-lease",
+		"default",
+	}
+	for _, ns := range blocked {
+		if err := guard.CheckNamespace(ns); err == nil {
+			t.Errorf("CheckNamespace(%q) expected error, got nil", ns)
+		}
 	}
 }
 
-func TestCheckNamespace_OtherNamespacePasses(t *testing.T) {
-	cases := []string{
-		"default",
+func TestCheckNamespace_UserNamespacePasses(t *testing.T) {
+	allowed := []string{
 		"production",
-		"kube-system",
 		"my-workflow-ns",
 		"tentacular-user",
-		"",
+		"tent-wfs",
+		"foo-bar",
 	}
-	for _, ns := range cases {
+	for _, ns := range allowed {
 		if err := guard.CheckNamespace(ns); err != nil {
 			t.Errorf("CheckNamespace(%q) returned unexpected error: %v", ns, err)
 		}
