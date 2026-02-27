@@ -12,6 +12,7 @@ import (
 
 	"github.com/randybias/tentacular-mcp/pkg/guard"
 	"github.com/randybias/tentacular-mcp/pkg/k8s"
+	"github.com/randybias/tentacular-mcp/pkg/proxy"
 )
 
 func newTestClient() *k8s.Client {
@@ -33,7 +34,8 @@ func TestRegisterAll(t *testing.T) {
 	srv := newTestServer()
 	client := newTestClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	RegisterAll(srv, client, logger)
+	reconciler := proxy.NewReconciler(client, proxy.Options{Namespace: "tentacular-system"}, logger)
+	RegisterAll(srv, client, reconciler, logger)
 }
 
 // TestGuardCheckNamespace verifies the guard rejects tentacular-system.
