@@ -21,10 +21,10 @@ type WfRunParams struct {
 
 // WfRunResult is the result of wf_run.
 type WfRunResult struct {
-	Name       string `json:"name"`
-	Namespace  string `json:"namespace"`
-	Output     any    `json:"output"`
-	DurationMs int64  `json:"duration_ms"`
+	Name       string         `json:"name"`
+	Namespace  string         `json:"namespace"`
+	Output     map[string]any `json:"output"`
+	DurationMs int64          `json:"duration_ms"`
 }
 
 func registerRunTools(srv *mcp.Server, client *k8s.Client) {
@@ -61,11 +61,12 @@ func handleWfRun(ctx context.Context, client *k8s.Client, params WfRunParams) (W
 		return WfRunResult{}, err
 	}
 
-	// Unmarshal raw JSON into any so the MCP schema accepts any JSON type.
-	var output any
+	// Unmarshal raw JSON into map[string]any so the MCP schema generates
+	// {"type": "object"} which Claude Code's Zod validator accepts.
+	var output map[string]any
 	if len(raw) > 0 {
 		if jsonErr := json.Unmarshal(raw, &output); jsonErr != nil {
-			output = string(raw)
+			output = map[string]any{"raw": string(raw)}
 		}
 	}
 
