@@ -1,7 +1,7 @@
 // Package scheduler provides an in-process cron scheduler for tentacular
 // workflows. Instead of creating CronJob+Pod+curl for each scheduled trigger,
-// the scheduler runs inside the MCP server and triggers workflows via the
-// Kubernetes API service proxy — the same path as wf_run.
+// the scheduler runs inside the MCP server and triggers workflows via direct
+// HTTP to the workflow's ClusterIP service — the same path as wf_run.
 package scheduler
 
 import (
@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/robfig/cron/v3"
 
@@ -115,11 +116,14 @@ func (s *Scheduler) Entries() int {
 	return len(s.entries)
 }
 
-// trigger fires a workflow run via the API service proxy.
+// trigger fires a workflow run via direct HTTP to the workflow's ClusterIP
+// service. Uses a 120s context timeout matching the default wf_run timeout
+// to prevent goroutine leaks from hung workflows.
 func (s *Scheduler) trigger(namespace, name string) {
 	s.logger.Info("cron trigger firing", "workflow", namespace+"/"+name)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
 	output, err := k8s.RunWorkflow(ctx, s.client, namespace, name, nil)
 	if err != nil {
 		s.logger.Error("cron trigger failed", "workflow", namespace+"/"+name, "error", err)
