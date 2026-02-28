@@ -74,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 		w.Write([]byte(`{"error":"not_found"}`))
 	})
 	mux.Handle("/.well-known/", jsonNotFound)
+	mux.Handle("/mcp/.well-known/", jsonNotFound)
 	mux.Handle("/register", jsonNotFound)
 
 	return auth.Middleware(s.token, mux)

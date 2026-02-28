@@ -28,17 +28,18 @@ func LoadToken(path string) (string, error) {
 func Middleware(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Bypass auth for health checks and OAuth/OIDC discovery probes.
-		// MCP clients (protocol version 2025-11-25+) probe /.well-known/*
-		// paths to discover OAuth configuration. These must return 404 (not
-		// 401) so the client knows no OAuth is configured and falls back to
-		// the static Authorization header from .mcp.json.
-		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/.well-known/") {
+		// MCP clients (protocol version 2025-11-25+) probe .well-known
+		// paths to discover OAuth configuration. These appear both at the
+		// root (/.well-known/*) and under the MCP endpoint (/mcp/.well-known/*).
+		// They must reach the mux (which returns JSON 404) rather than being
+		// rejected by auth, so the client knows no OAuth is configured and
+		// falls back to the static Authorization header from .mcp.json.
+		if r.URL.Path == "/healthz" || strings.Contains(r.URL.Path, ".well-known") {
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		// Also bypass auth for dynamic client registration endpoint.
-		// MCP clients probe POST /register during OAuth discovery.
 		if r.URL.Path == "/register" {
 			next.ServeHTTP(w, r)
 			return
