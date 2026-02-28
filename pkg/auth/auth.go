@@ -3,7 +3,6 @@ package auth
 import (
 	"crypto/subtle"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -23,19 +22,16 @@ func LoadToken(path string) (string, error) {
 }
 
 // Middleware returns an HTTP middleware that validates Bearer token authentication.
-// Bypasses auth for /healthz and .well-known discovery paths (OAuth/OIDC probes
-// sent by MCP clients are unauthenticated by design).
+// The /healthz endpoint bypasses authentication.
 func Middleware(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || r.URL.Path == "/register" || strings.Contains(r.URL.Path, ".well-known") {
+		if r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			slog.Warn("auth rejected: no authorization header",
-				"method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 			http.Error(w, "missing authorization header", http.StatusUnauthorized)
 			return
 		}
