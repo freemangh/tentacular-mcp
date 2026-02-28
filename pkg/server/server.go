@@ -75,5 +75,5 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 
 // registerTools registers all MCP tools by delegating to the tools package.
 func (s *Server) registerTools() {
-	tools.RegisterAll(s.mcpServer, s.client, s.reconciler, s.scheduler, s.logger)
+	tools.RegisterAll(s.mcpServer, s.client, s.reconciler, s.scheduler)
 }
