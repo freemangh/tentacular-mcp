@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 
+	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/randybias/tentacular-mcp/pkg/auth"
 	"github.com/randybias/tentacular-mcp/pkg/k8s"
 	"github.com/randybias/tentacular-mcp/pkg/proxy"
@@ -64,10 +66,21 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/mcp", mcpHandler)
 	mux.HandleFunc("/healthz", s.healthHandler)
 
-	// MCP clients (protocol 2025-11-25+) probe OAuth/OIDC discovery
-	// endpoints before connecting. Return JSON 404 so the client knows
-	// no OAuth is configured and falls back to static Bearer token auth.
-	// Go's default mux returns text/plain 404 which causes JSON parse errors.
+	// MCP clients (protocol 2025-11-25+) probe OAuth discovery endpoints
+	// before connecting. Serve Protected Resource Metadata (RFC 9728) to
+	// tell the client that Bearer token auth via the Authorization header
+	// is the expected mechanism. Without this, the client enters an OAuth
+	// browser flow instead of using the static token from .mcp.json.
+	resourceMetadata := sdkauth.ProtectedResourceMetadataHandler(&oauthex.ProtectedResourceMetadata{
+		Resource:               "http://localhost:8080/mcp",
+		BearerMethodsSupported: []string{"header"},
+	})
+	mux.Handle("/.well-known/oauth-protected-resource", resourceMetadata)
+	mux.Handle("/.well-known/oauth-protected-resource/mcp", resourceMetadata)
+	mux.Handle("/mcp/.well-known/oauth-protected-resource", resourceMetadata)
+
+	// Return JSON 404 for other discovery paths (OIDC, authorization server)
+	// so Go's default text/plain 404 doesn't cause JSON parse errors.
 	jsonNotFound := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
