@@ -3,7 +3,6 @@ package auth
 import (
 	"crypto/subtle"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -24,57 +23,30 @@ func LoadToken(path string) (string, error) {
 
 // Middleware returns an HTTP middleware that validates Bearer token authentication.
 // The /healthz endpoint bypasses authentication.
-// Error responses are JSON-formatted per the MCP Streamable HTTP transport spec.
 func Middleware(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Bypass auth for health checks and OAuth/OIDC discovery probes.
-		// MCP clients (protocol version 2025-11-25+) probe .well-known
-		// paths to discover OAuth configuration. These appear both at the
-		// root (/.well-known/*) and under the MCP endpoint (/mcp/.well-known/*).
-		// They must reach the mux (which returns JSON 404) rather than being
-		// rejected by auth, so the client knows no OAuth is configured and
-		// falls back to the static Authorization header from .mcp.json.
-		if r.URL.Path == "/healthz" || strings.Contains(r.URL.Path, ".well-known") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// Also bypass auth for dynamic client registration endpoint.
-		if r.URL.Path == "/register" {
+		if r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			slog.Warn("auth rejected: missing authorization header",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"remote", r.RemoteAddr,
-				"headers", fmt.Sprintf("%v", r.Header))
-			writeAuthError(w, "missing authorization header")
+			http.Error(w, "missing authorization header", http.StatusUnauthorized)
 			return
 		}
 
 		if !strings.HasPrefix(authHeader, "Bearer ") {
-			writeAuthError(w, "invalid authorization header format")
+			http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
 			return
 		}
 
 		provided := strings.TrimPrefix(authHeader, "Bearer ")
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
-			writeAuthError(w, "invalid token")
+			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-// writeAuthError sends a JSON-formatted 401 response. MCP Streamable HTTP
-// clients expect JSON error bodies; plain text causes parse failures.
-func writeAuthError(w http.ResponseWriter, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	fmt.Fprintf(w, `{"error":"unauthorized","error_description":%q}`, msg)
 }
