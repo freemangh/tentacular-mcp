@@ -24,7 +24,7 @@ Developer workstations holding cluster-wide admin kubeconfig is a security anti-
                             |  |   |  call handler              |  |
                             |  |   |  marshal result            |  |
                             |  |   v                            |  |
-                            |  | pkg/tools/*.go (30 tools)      |  |
+                            |  | pkg/tools/*.go (31 tools)      |  |
                             |  |   |                            |  |
                             |  |   v                            |  |
                             |  | pkg/k8s/* (K8s client layer)   |  |
@@ -109,7 +109,7 @@ curl http://localhost:8080/healthz
 
 ## MCP Tools
 
-30 tools organized across 11 functional groups. All namespace-scoped tools enforce a self-protection guard that rejects operations targeting `tentacular-system`.
+31 tools organized across 12 functional groups. All namespace-scoped tools enforce a self-protection guard that rejects operations targeting `tentacular-system`.
 
 ### Namespace Lifecycle
 
@@ -303,7 +303,7 @@ pkg/guard/                    Self-protection namespace guard
 pkg/k8s/                      Kubernetes client and operations
 pkg/proxy/                    Module proxy reconciler and manifests
 pkg/server/                   MCP server setup and HTTP handler
-pkg/tools/                    30 MCP tool handlers (one file per group)
+pkg/tools/                    31 MCP tool handlers (one file per group)
 deploy/manifests/             Kustomize-based deployment manifests
 test/integration/             Integration tests (kind cluster)
 test/e2e/                     E2E tests (production cluster)
@@ -333,7 +333,7 @@ Every created namespace gets:
 
 ### RBAC Scoping
 
-The server's ClusterRole is scoped to exactly the verbs and resources needed by the 30 tools. It is significantly narrower than `cluster-admin`. Key constraints:
+The server's ClusterRole is scoped to exactly the verbs and resources needed by the 31 tools. It is significantly narrower than `cluster-admin`. Key constraints:
 - Read-only access to nodes, storage classes, runtime classes, CRDs
 - Create/delete for pods (gVisor verification only)
 - Namespaced CRUD for resources managed by tool handlers
