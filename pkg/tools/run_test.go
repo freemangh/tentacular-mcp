@@ -34,10 +34,11 @@ func newRunToolTestClient(namespaces ...string) *k8s.Client {
 }
 
 // newRunToolTestClientWithProxy creates a client backed by a real HTTP test
-// server so the K8s API service proxy path works in tests.
+// server. The K8s clientset handles namespace lookups for guard checks, and
+// the HTTP client redirects direct workflow calls to the test server.
 func newRunToolTestClientWithProxy(t *testing.T, handler http.HandlerFunc, namespaces ...string) (*k8s.Client, *httptest.Server) {
 	t.Helper()
-	// Seed managed namespaces into the handler so namespace lookups work
+	// Seed managed namespaces into the K8s API handler for guard checks
 	mux := http.NewServeMux()
 	for _, name := range namespaces {
 		ns := name // capture
@@ -46,15 +47,34 @@ func newRunToolTestClientWithProxy(t *testing.T, handler http.HandlerFunc, names
 			w.Write([]byte(`{"metadata":{"name":"` + ns + `","labels":{"app.kubernetes.io/managed-by":"tentacular"}}}`))
 		})
 	}
-	// Proxy endpoint
-	mux.HandleFunc("/api/v1/namespaces/", handler)
+	// Workflow /run endpoint (direct HTTP)
+	mux.HandleFunc("/run", handler)
+	// Keep K8s API fallback for any other namespace lookups
+	mux.HandleFunc("/api/v1/namespaces/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
 
 	server := httptest.NewServer(mux)
 	clientset, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &k8s.Client{Clientset: clientset, Config: &rest.Config{Host: server.URL}}, server
+	// HTTP client redirects .svc.cluster.local URLs to the test server
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req.URL.Scheme = "http"
+			req.URL.Host = server.Listener.Addr().String()
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}
+	return &k8s.Client{Clientset: clientset, Config: &rest.Config{Host: server.URL}, HTTP: httpClient}, server
+}
+
+// roundTripFunc adapts a function to http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 // TestHandleWfRun_SystemNamespaceRejected verifies the guard rejects tentacular-system
@@ -125,7 +145,7 @@ func TestWfRunParams_TimeoutDefaults(t *testing.T) {
 }
 
 // TestHandleWfRun_ManagedNamespacePassesGuard verifies that a managed namespace
-// passes the guard check and the run completes via the API service proxy.
+// passes the guard check and the run completes via direct HTTP.
 func TestHandleWfRun_ManagedNamespacePassesGuard(t *testing.T) {
 	client, server := newRunToolTestClientWithProxy(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
