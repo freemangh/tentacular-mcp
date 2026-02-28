@@ -50,7 +50,7 @@ func TestProxyStatus_NotInstalled(t *testing.T) {
 		t.Error("expected installed=false before reconcile")
 	}
 	if result.Namespace != "tentacular-support" {
-		t.Errorf("expected namespace=tentacular-system, got %q", result.Namespace)
+		t.Errorf("expected namespace=tentacular-support, got %q", result.Namespace)
 	}
 }
 

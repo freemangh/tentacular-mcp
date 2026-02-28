@@ -28,7 +28,7 @@ func newTestReconciler(opts Options) (*Reconciler, *k8s.Client) {
 func TestNewReconciler_DefaultNamespace(t *testing.T) {
 	r, _ := newTestReconciler(Options{})
 	if r.Namespace() != "tentacular-support" {
-		t.Errorf("expected tentacular-system, got %q", r.Namespace())
+		t.Errorf("expected tentacular-support, got %q", r.Namespace())
 	}
 }
 
