@@ -21,6 +21,7 @@ func RegisterAll(srv *mcp.Server, client *k8s.Client, reconciler *proxy.Reconcil
 	registerGVisorTools(srv, client)
 	registerDeployTools(srv, client, sched)
 	registerHealthTools(srv, client)
+	registerWfHealthTools(srv, client)
 	registerAuditTools(srv, client)
 	registerProxyTools(srv, reconciler)
 }
