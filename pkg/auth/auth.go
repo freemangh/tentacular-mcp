@@ -27,7 +27,19 @@ func LoadToken(path string) (string, error) {
 // Error responses are JSON-formatted per the MCP Streamable HTTP transport spec.
 func Middleware(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" {
+		// Bypass auth for health checks and OAuth/OIDC discovery probes.
+		// MCP clients (protocol version 2025-11-25+) probe /.well-known/*
+		// paths to discover OAuth configuration. These must return 404 (not
+		// 401) so the client knows no OAuth is configured and falls back to
+		// the static Authorization header from .mcp.json.
+		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/.well-known/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Also bypass auth for dynamic client registration endpoint.
+		// MCP clients probe POST /register during OAuth discovery.
+		if r.URL.Path == "/register" {
 			next.ServeHTTP(w, r)
 			return
 		}
