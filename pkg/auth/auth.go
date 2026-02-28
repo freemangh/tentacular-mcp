@@ -23,6 +23,7 @@ func LoadToken(path string) (string, error) {
 
 // Middleware returns an HTTP middleware that validates Bearer token authentication.
 // The /healthz endpoint bypasses authentication.
+// Error responses are JSON-formatted per the MCP Streamable HTTP transport spec.
 func Middleware(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
@@ -32,21 +33,29 @@ func Middleware(token string, next http.Handler) http.Handler {
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "missing authorization header", http.StatusUnauthorized)
+			writeAuthError(w, "missing authorization header")
 			return
 		}
 
 		if !strings.HasPrefix(authHeader, "Bearer ") {
-			http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
+			writeAuthError(w, "invalid authorization header format")
 			return
 		}
 
 		provided := strings.TrimPrefix(authHeader, "Bearer ")
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
-			http.Error(w, "invalid token", http.StatusUnauthorized)
+			writeAuthError(w, "invalid token")
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// writeAuthError sends a JSON-formatted 401 response. MCP Streamable HTTP
+// clients expect JSON error bodies; plain text causes parse failures.
+func writeAuthError(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	fmt.Fprintf(w, `{"error":"unauthorized","error_description":%q}`, msg)
 }
