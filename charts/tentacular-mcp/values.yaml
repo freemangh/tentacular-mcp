@@ -6,8 +6,8 @@ image:
   registry: ghcr.io
   # -- Container image repository
   repository: randybias/tentacular-mcp
-  # -- Container image tag (defaults to Chart appVersion)
-  tag: ""
+  # -- Container image tag
+  tag: "latest"
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
