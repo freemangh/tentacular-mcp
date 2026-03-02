@@ -34,17 +34,29 @@ The system SHALL verify that a namespace has at least a default-deny NetworkPoli
 - **THEN** the system returns `default_deny: false` with a finding noting unrestricted egress
 
 ### Requirement: Audit Pod Security Admission labels
-The system SHALL check the Pod Security Admission labels on a namespace and report the enforce, audit, and warn levels. The system SHALL flag namespaces that do not have PSA enforce set to `restricted` or that have no PSA labels at all. The system SHALL reject the operation if the target namespace is `tentacular-system`.
+The system SHALL check the Pod Security Admission labels on a namespace and report the enforce, audit, and warn levels. The system SHALL flag namespaces that do not have PSA enforce set to `restricted` or that have no PSA labels at all. The system SHALL treat `privileged` enforce level as high severity (all checks disabled) and `baseline` as medium severity. The system SHALL detect when audit or warn levels are weaker than the enforce level. The system SHALL return findings with remediation suggestions. The system SHALL reject the operation if the target namespace is `tentacular-system`.
 
 #### Scenario: Namespace with restricted PSA
-- **WHEN** the `audit_psa` tool is called with `namespace: "dev-alice"` and PSA enforce is `restricted`
-- **THEN** the system returns `compliant: true` with the enforce, audit, and warn levels
+- **WHEN** the `audit_psa` tool is called with `namespace: "dev-alice"` and PSA enforce is `restricted` with matching audit and warn levels
+- **THEN** the system returns `compliant: true` with the enforce, audit, and warn levels and no findings
 
-#### Scenario: Namespace with baseline or privileged PSA
+#### Scenario: Namespace with privileged PSA
+- **WHEN** the `audit_psa` tool is called and PSA enforce is `privileged`
+- **THEN** the system returns `compliant: false` with a high-severity finding indicating all pod security checks are disabled
+
+#### Scenario: Namespace with baseline PSA
 - **WHEN** the `audit_psa` tool is called and PSA enforce is `baseline`
-- **THEN** the system returns `compliant: false` with a finding recommending upgrade to `restricted`
+- **THEN** the system returns `compliant: false` with a medium-severity finding recommending upgrade to `restricted`
 
 #### Scenario: Namespace with no PSA labels
 - **WHEN** the `audit_psa` tool is called and no PSA labels exist on the namespace
-- **THEN** the system returns `compliant: false` with a finding noting the absence of PSA configuration
+- **THEN** the system returns `compliant: false` with a high-severity finding noting the absence of PSA configuration
+
+#### Scenario: Audit level weaker than enforce
+- **WHEN** the `audit_psa` tool is called and the audit level is weaker than the enforce level (e.g. enforce=restricted, audit=baseline)
+- **THEN** the system returns a medium-severity finding noting the audit log will not capture all violations
+
+#### Scenario: Warn level weaker than enforce
+- **WHEN** the `audit_psa` tool is called and the warn level is weaker than the enforce level
+- **THEN** the system returns a medium-severity finding noting users will not see warnings for all enforced restrictions
 

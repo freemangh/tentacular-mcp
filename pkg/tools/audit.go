@@ -63,8 +63,9 @@ type AuditPsaParams struct {
 
 // AuditPsaFinding is a single PSA audit finding.
 type AuditPsaFinding struct {
-	Severity string `json:"severity"`
-	Message  string `json:"message"`
+	Severity    string `json:"severity"`
+	Message     string `json:"message"`
+	Remediation string `json:"remediation,omitempty"`
 }
 
 // AuditPsaResult is the result of audit_psa.
@@ -101,7 +102,7 @@ func registerAuditTools(srv *mcp.Server, client *k8s.Client) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "audit_psa",
-		Description: "Audit Pod Security Admission labels on a namespace: check enforce/audit/warn levels and flag non-restricted or missing configuration.",
+		Description: "Audit Pod Security Admission labels on a namespace: check enforce/audit/warn levels, flag privileged or missing enforcement, detect audit/warn level mismatches, and return remediation suggestions.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params AuditPsaParams) (*mcp.CallToolResult, AuditPsaResult, error) {
 		if err := guard.CheckNamespace(params.Namespace); err != nil {
 			return nil, AuditPsaResult{}, err
@@ -290,6 +291,14 @@ func handleAuditNetpol(ctx context.Context, client *k8s.Client, params AuditNetp
 	}, nil
 }
 
+// psaLevelOrder maps PSA levels to a numeric rank for comparison.
+// Higher rank = more restrictive.
+var psaLevelOrder = map[string]int{
+	"privileged": 0,
+	"baseline":   1,
+	"restricted": 2,
+}
+
 func handleAuditPsa(ctx context.Context, client *k8s.Client, params AuditPsaParams) (AuditPsaResult, error) {
 	ns, err := k8s.GetNamespace(ctx, client, params.Namespace)
 	if err != nil {
@@ -306,30 +315,61 @@ func handleAuditPsa(ctx context.Context, client *k8s.Client, params AuditPsaPara
 
 	if enforce == "" {
 		findings = append(findings, AuditPsaFinding{
-			Severity: "high",
-			Message:  "pod-security.kubernetes.io/enforce label is missing; no PSA enforcement active",
+			Severity:    "high",
+			Message:     "pod-security.kubernetes.io/enforce label is missing; no PSA enforcement active",
+			Remediation: "Add the label pod-security.kubernetes.io/enforce=restricted to the namespace.",
+		})
+		compliant = false
+	} else if enforce == "privileged" {
+		findings = append(findings, AuditPsaFinding{
+			Severity:    "high",
+			Message:     "PSA enforce level is \"privileged\"; all pod security checks are disabled",
+			Remediation: "Set pod-security.kubernetes.io/enforce to \"restricted\" (or \"baseline\" as a first step).",
 		})
 		compliant = false
 	} else if enforce != "restricted" {
 		findings = append(findings, AuditPsaFinding{
-			Severity: "medium",
-			Message:  fmt.Sprintf("PSA enforce level is %q; recommended level is \"restricted\"", enforce),
+			Severity:    "medium",
+			Message:     fmt.Sprintf("PSA enforce level is %q; recommended level is \"restricted\"", enforce),
+			Remediation: "Set pod-security.kubernetes.io/enforce to \"restricted\" for full pod security enforcement.",
 		})
 		compliant = false
 	}
 
 	if audit == "" {
 		findings = append(findings, AuditPsaFinding{
-			Severity: "low",
-			Message:  "pod-security.kubernetes.io/audit label is missing",
+			Severity:    "low",
+			Message:     "pod-security.kubernetes.io/audit label is missing",
+			Remediation: "Add pod-security.kubernetes.io/audit=restricted to log PSA violations in the audit log.",
 		})
 	}
 
 	if warn == "" {
 		findings = append(findings, AuditPsaFinding{
-			Severity: "low",
-			Message:  "pod-security.kubernetes.io/warn label is missing",
+			Severity:    "low",
+			Message:     "pod-security.kubernetes.io/warn label is missing",
+			Remediation: "Add pod-security.kubernetes.io/warn=restricted so users see warnings when deploying non-compliant pods.",
 		})
+	}
+
+	// Check audit/warn level mismatch: if they are weaker than enforce,
+	// users won't get dry-run feedback for the enforced policy.
+	if enforce != "" {
+		enforceRank := psaLevelOrder[enforce]
+		if audit != "" && psaLevelOrder[audit] < enforceRank {
+			findings = append(findings, AuditPsaFinding{
+				Severity:    "medium",
+				Message:     fmt.Sprintf("audit level %q is weaker than enforce level %q; audit log will not capture all violations", audit, enforce),
+				Remediation: fmt.Sprintf("Set pod-security.kubernetes.io/audit to %q or stricter to match enforcement.", enforce),
+			})
+		}
+		if warn != "" && psaLevelOrder[warn] < enforceRank {
+			findings = append(findings, AuditPsaFinding{
+				Severity:    "medium",
+				Message:     fmt.Sprintf("warn level %q is weaker than enforce level %q; users will not see warnings for all enforced restrictions", warn, enforce),
+				Remediation: fmt.Sprintf("Set pod-security.kubernetes.io/warn to %q or stricter to match enforcement.", enforce),
+			})
+		}
 	}
 
 	return AuditPsaResult{
