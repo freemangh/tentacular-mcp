@@ -517,6 +517,153 @@ func TestAuditPsaNonRestrictedLevel(t *testing.T) {
 	}
 }
 
+func TestAuditPsaPrivilegedIsHighSeverity(t *testing.T) {
+	client := newAuditTestClient()
+	ctx := context.Background()
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "priv-ns",
+			Labels: map[string]string{"pod-security.kubernetes.io/enforce": "privileged"},
+		},
+	}
+	client.Clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+
+	result, err := handleAuditPsa(ctx, client, AuditPsaParams{Namespace: "priv-ns"})
+	if err != nil {
+		t.Fatalf("handleAuditPsa: %v", err)
+	}
+	if result.Compliant {
+		t.Error("expected Compliant=false for privileged enforce level")
+	}
+
+	hasHigh := false
+	for _, f := range result.Findings {
+		if f.Severity == "high" && strings.Contains(f.Message, "privileged") {
+			hasHigh = true
+		}
+	}
+	if !hasHigh {
+		t.Error("expected high severity finding for privileged enforce level")
+	}
+}
+
+func TestAuditPsaAuditLevelMismatch(t *testing.T) {
+	client := newAuditTestClient()
+	ctx := context.Background()
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "mismatch-audit-ns",
+			Labels: map[string]string{
+				"pod-security.kubernetes.io/enforce": "restricted",
+				"pod-security.kubernetes.io/audit":   "baseline",
+				"pod-security.kubernetes.io/warn":    "restricted",
+			},
+		},
+	}
+	client.Clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+
+	result, err := handleAuditPsa(ctx, client, AuditPsaParams{Namespace: "mismatch-audit-ns"})
+	if err != nil {
+		t.Fatalf("handleAuditPsa: %v", err)
+	}
+
+	found := false
+	for _, f := range result.Findings {
+		if f.Severity == "medium" && strings.Contains(f.Message, "audit level") {
+			found = true
+			if f.Remediation == "" {
+				t.Error("expected remediation text for audit mismatch finding")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected medium finding for audit level weaker than enforce")
+	}
+}
+
+func TestAuditPsaWarnLevelMismatch(t *testing.T) {
+	client := newAuditTestClient()
+	ctx := context.Background()
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "mismatch-warn-ns",
+			Labels: map[string]string{
+				"pod-security.kubernetes.io/enforce": "restricted",
+				"pod-security.kubernetes.io/audit":   "restricted",
+				"pod-security.kubernetes.io/warn":    "privileged",
+			},
+		},
+	}
+	client.Clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+
+	result, err := handleAuditPsa(ctx, client, AuditPsaParams{Namespace: "mismatch-warn-ns"})
+	if err != nil {
+		t.Fatalf("handleAuditPsa: %v", err)
+	}
+
+	found := false
+	for _, f := range result.Findings {
+		if f.Severity == "medium" && strings.Contains(f.Message, "warn level") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected medium finding for warn level weaker than enforce")
+	}
+}
+
+func TestAuditPsaNoMismatchWhenAllRestricted(t *testing.T) {
+	client := newAuditTestClient()
+	ctx := context.Background()
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "all-restricted-ns",
+			Labels: map[string]string{
+				"pod-security.kubernetes.io/enforce": "restricted",
+				"pod-security.kubernetes.io/audit":   "restricted",
+				"pod-security.kubernetes.io/warn":    "restricted",
+			},
+		},
+	}
+	client.Clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+
+	result, err := handleAuditPsa(ctx, client, AuditPsaParams{Namespace: "all-restricted-ns"})
+	if err != nil {
+		t.Fatalf("handleAuditPsa: %v", err)
+	}
+	if !result.Compliant {
+		t.Errorf("expected Compliant=true, findings: %v", result.Findings)
+	}
+	if len(result.Findings) != 0 {
+		t.Errorf("expected no findings for fully compliant namespace, got %d: %v", len(result.Findings), result.Findings)
+	}
+}
+
+func TestAuditPsaRemediationPresent(t *testing.T) {
+	client := newAuditTestClient()
+	ctx := context.Background()
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "rem-psa-ns"},
+	}
+	client.Clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+
+	result, err := handleAuditPsa(ctx, client, AuditPsaParams{Namespace: "rem-psa-ns"})
+	if err != nil {
+		t.Fatalf("handleAuditPsa: %v", err)
+	}
+
+	for _, f := range result.Findings {
+		if f.Remediation == "" {
+			t.Errorf("finding %q missing remediation text", f.Message)
+		}
+	}
+}
+
 func TestAuditPsaNonExistentNamespace(t *testing.T) {
 	client := newAuditTestClient()
 	ctx := context.Background()
