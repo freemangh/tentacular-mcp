@@ -6,37 +6,18 @@ An in-cluster MCP (Model Context Protocol) server for Kubernetes namespace lifec
 
 Developer workstations holding cluster-wide admin kubeconfig is a security anti-pattern. tentacular-mcp proxies Kubernetes operations through a controlled ServiceAccount so CLI clients (and any MCP-capable client) interact with the cluster over one authenticated endpoint instead of raw kube-api access.
 
+## Related Repositories
+
+| Repository | Purpose |
+|------------|---------|
+| [tentacular](https://github.com/randybias/tentacular) | Go CLI + Deno workflow engine |
+| [tentacular-skill](https://github.com/randybias/tentacular-skill) | Agent skill definition for AI assistants |
+
 ## Architecture
 
-```
-+------------------+        +-------------------------------------+
-|  tentacular CLI  |        |   tentacular-system namespace       |
-|  (or any MCP     | Bearer |                                     |
-|   client)        +------->+  tentacular-mcp Deployment          |
-|                  |  :8080 |  +-------------------------------+  |
-+------------------+  /mcp  |  | auth.Middleware (Bearer token) |  |
-                            |  |   |                            |  |
-                            |  | server.Handler (MCP SDK)       |  |
-                            |  |   |                            |  |
-                            |  | pkg/tools/register.go          |  |
-                            |  |   |  guard.CheckNamespace()    |  |
-                            |  |   |  unmarshal params          |  |
-                            |  |   |  call handler              |  |
-                            |  |   |  marshal result            |  |
-                            |  |   v                            |  |
-                            |  | pkg/tools/*.go (32 tools)      |  |
-                            |  |   |                            |  |
-                            |  |   v                            |  |
-                            |  | pkg/k8s/* (K8s client layer)   |  |
-                            |  +---+---------------------------+  |
-                            |      |                              |
-                            +------+------------------------------+
-                                   |
-                                   v
-                            +------+------------------------------+
-                            |  Kubernetes API Server              |
-                            +-------------------------------------+
-```
+![MCP Server Architecture](docs/diagrams/mcp-server-architecture.svg)
+
+The MCP server also manages the **module proxy** in the `tentacular-support` namespace. On startup, the proxy reconciler (`pkg/proxy/`) auto-creates an esm.sh Deployment and Service that caches jsr/npm modules for workflow pods. This eliminates direct internet egress from workflow containers. See the [tentacular architecture docs](https://github.com/randybias/tentacular/blob/main/docs/esm-module-proxy.md) for the full module proxy design.
 
 ### Request Flow
 
@@ -219,7 +200,7 @@ curl http://localhost:8080/healthz
 
 | Tool | Description |
 |------|-------------|
-| `wf_run` | Trigger a deployed workflow by POSTing to the workflow's `/run` endpoint via the Kubernetes API service proxy. Returns the JSON output with execution duration. Timeout configurable (default 120s, max 600s). No ephemeral pods are created. |
+| `wf_run` | Trigger a deployed workflow by POSTing directly to the workflow's ClusterIP service `/run` endpoint. NetworkPolicy allows ingress from tentacular-system via namespaceSelector. Returns the JSON output with execution duration. Timeout configurable (default 120s, max 600s). No ephemeral pods are created. |
 
 ### Module Proxy
 
@@ -420,6 +401,8 @@ per-command flags needed.
 The CLI has no direct Kubernetes API access. All cluster-facing
 commands (deploy, run, list, status, logs, undeploy, audit,
 cluster check, cluster profile) route through MCP.
+
+On startup, the MCP server's proxy reconciler auto-creates the esm.sh module proxy in `tentacular-support`. See the [tentacular docs](https://github.com/randybias/tentacular/blob/main/docs/esm-module-proxy.md) for the full infrastructure bootstrapping sequence.
 
 ### MCP Tools Used by CLI
 
